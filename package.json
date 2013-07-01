@@ -1,7 +1,7 @@
 {
 	"name": "redis-pusher",
 	"version": "0.0.1",
-	"description": "redis-pusher is a Node.js application that subscribes to channels on Redis, consumes messages published there, and send them as Push Notification via Apple Push Notification Service (APNS).",
+	"description": "A Node.js application that consumes messages published on Redis channels and send them as Push Notifications via APNS.",
 	"author": "Jardel Weyrich <jweyrich@gmail.com>",
 	"main": "index.js",
 	"dependencies": {
