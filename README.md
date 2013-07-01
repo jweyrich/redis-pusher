@@ -1,8 +1,7 @@
 # redis-pusher
 
-redis-pusher is a Node.js application that subscribes to channels on Redis,
-consumes messages published there, and send them as Push Notification via
-Apple Push Notification Service (APNS).
+A Node.js application that consumes messages published on Redis channels and
+send them as Push Notifications via APNS.
 
 1. Workflow
 
@@ -45,7 +44,7 @@ Apple Push Notification Service (APNS).
 
 ##### Clone the repository
 
-  $ git clone git@github.com:jweyrich/redis-pusher.git
+	$ git clone git@github.com:jweyrich/redis-pusher.git
 
 ##### Install the dependencies
 
