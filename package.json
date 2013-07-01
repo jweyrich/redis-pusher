@@ -2,8 +2,13 @@
 	"name": "redis-pusher",
 	"version": "0.0.1",
 	"description": "A Node.js application that consumes messages published on Redis channels and send them as Push Notifications via APNS.",
+	"keywords": [ "redis", "sharding", "apple", "push", "notification", "iOS", "apns" ],
 	"author": "Jardel Weyrich <jweyrich@gmail.com>",
 	"main": "index.js",
+	"repository": {
+		"type": "git",
+		"url": "git@github.com:jweyrich/redis-pusher.git"
+	},
 	"dependencies": {
 		"apn": "~1.3.2",
 		"redis": "~0.8.4",
@@ -13,8 +18,5 @@
 		"node": "~0.10.12",
 		"npm": "~1.2.32"
 	},
-	"repository": {
-		"type": "git",
-		"url": "git@github.com:jweyrich/redis-pusher.git"
-	}
+	"license": "MIT"
 }
