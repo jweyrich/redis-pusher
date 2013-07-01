@@ -56,7 +56,7 @@ redisSubscriber.on('error', function (err) {
 	// Error handling elided for brevity
 	var apnsMessage = new APNSMessage(message);
 
-	acquireLock(apnsMessage);
+	processMessage(apnsMessage);
 });
 
 //
@@ -92,7 +92,7 @@ apnsFeedback.on('error', function (err) {
 	});
 });
 
-function acquireLock(message) {
+function processMessage(message) {
 	var worker = new RedisLockingWorker({
 		'client': redisClient,
 		'lockKey' : config[environment].redis.lock.keyPrefix + message.identifier,
@@ -102,7 +102,7 @@ function acquireLock(message) {
 	});
 	worker.on("acquired", function (lastAttempt) {
 		console.log("[redis-client] Acquired lock %s", worker.lockKey);
-		sendMessage(message);
+		dispatchMessage(message);
 		if (config[environment].redis.failoverEnabled)
 			worker.done(lastAttempt);
 		else {
@@ -123,9 +123,9 @@ function acquireLock(message) {
 	worker.acquire();
 }
 
-function sendMessage(message) {
+function dispatchMessage(message) {
 	// Does some work to process the message and generate an APNS notification object
-	var notification = generateApnsNotification(message);
+	var notification = buildApnsNotification(message);
 
 	if (notification) {
 		console.log("[apns-gateway] Sending notification %d to device %s",
@@ -136,7 +136,7 @@ function sendMessage(message) {
 	}
 }
 
-function generateApnsNotification(message) {
+function buildApnsNotification(message) {
 	var note = new apn.Notification();
 	// Expires in `message.expires` seconds from now.
 	note.expiry = Math.floor(Date.now() / 1000) + message.expires;
