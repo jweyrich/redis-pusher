@@ -17,16 +17,35 @@ send them as Push Notifications via APNS.
 
 2. Sharding
 
-	You can split the workload across multiple instances.
-	To do that, configure `production.redis.channels` in your `private/config.js`.
+	You can split the workload across multiple `redis-pusher` instances.
+	To do that, configure `config.redis.channels` in your configuration file so
+	that each `redis-pusher` instance subscribes to different channel(s).
 
 3. Failover redundancy
 
-	You may have multipe instances subscribed to the same channel(s) simultaneously.
-	To do that, set `production.redis.failoverEnabled` to `true` in your
-	`private/config.js`.
+	You may have multipe instances subscribed to the same channel(s)
+	simultaneously. To do that, all your instances sharing the same channel(s)
+	must specify the same value for `config.redis.lock.keyPrefix` and set
+	`config.redis.failoverEnabled` to `true`.
 
-4. What redis-pusher does not attempt to do:
+4. Configuration
+
+	Each configuration file may be considered an environment (e.g.: development,
+	production, etc). A new configuration file can extend an existing
+	configuration by adding these lines before anything else:
+
+		var config = module.exports = require('./another_existing_file')
+		var this_config_name = 'example';
+		config.loaded.push(this_config_name);
+
+	To switch between environments (configurations), specify
+	`NODE_ENV=<env_name>` when running `redis-pusher`. Example:
+
+		NODE_ENV=production node .
+
+	The example above will load `./private/config.production.js`.
+
+5. What `redis-pusher` does not attempt to do
 
 	It does not process any of the APNS feedback messages. This is something
 	specific to your scenario. For example, your scenario might involve an SQL
@@ -56,22 +75,29 @@ send them as Push Notifications via APNS.
 ###### Configure
 
 a) Copy your APNS certificates and keys to the private
-   directory that resides within the project's directory.
+   directory that resides within the project's directory:
 
-	$ cp /path/to/your/apns_development.p12 \
+	$ cp -i /path/to/your/apns_development.p12 \
 		/path/to/your/apns_production.p12 \
 		private/
 
-b) Copy the example configuration file from the project's directory
-to the private directory.
+b) Copy the example configuration files to the project's `private`
+   directory:
 
-	$ cp example.config.js private/config.js
+	$ cp -ir examples/config/* private/
 
-c) Edit your private configuration file according to your needs. Change
-   the values below to match your development APNS certificate's password.
+c) Make sure nobody else can read the contents of your private directory:
 
-	development.apns.gateway.options.passphrase
-	development.apns.feedback.options.passphrase
+	$ chmod 700 private
+
+d) Edit your private configuration files according to your needs:
+
+	config.redis.host
+	config.redis.port
+	config.redis.pass
+	config.redis.channels
+	config.apns.certificate
+	config.apns.passphrase
 
 ###### Run it
 
