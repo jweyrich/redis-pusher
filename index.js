@@ -1,28 +1,21 @@
 /*
-	$ NODE_ENV=development node . 
-	$ NODE_ENV=production node . 
+	$ NODE_ENV=development node .
+	$ NODE_ENV=production node .
 */
 
-var config = require("./private/config"),
-	apn = require('apn'),
+var apn = require('apn'),
 	redis = require("redis"),
 	util = require('util'),
 	RedisLockingWorker = require("redis-locking-worker"),
-	APNSMessage = require("./lib/message");
-
-var environment = process.env.NODE_ENV || 'development';
-console.log('Running in ' + environment);
-
-config[environment].redis.channels.forEach(function (channel, index) {
-	config[environment].redis.channels[index] = environment + ':' + channel;
-});
+	APNSMessage = require("./lib/message"),
+	config = require("./config");
 
 //
 // REDIS MAIN CLIENT
 //
-var redisClient = redis.createClient(config[environment].redis.port, config[environment].redis.host);
-if (config[environment].redis.pass)
-	redisClient.auth(config[environment].redis.pass);
+var redisClient = redis.createClient(config.redis.port, config.redis.host);
+if (config.redis.pass)
+	redisClient.auth(config.redis.pass);
 redisClient.on('error', function (err) {
 	console.error("[redis-client] " + err);
 }).on('connect', function () {
@@ -34,14 +27,14 @@ redisClient.on('error', function (err) {
 //
 // REDIS SUBSCRIPTION CLIENT
 //
-var redisSubscriber = redis.createClient(config[environment].redis.port, config[environment].redis.host);
-if (config[environment].redis.pass)
-	redisSubscriber.auth(config[environment].redis.pass);
+var redisSubscriber = redis.createClient(config.redis.port, config.redis.host);
+if (config.redis.pass)
+	redisSubscriber.auth(config.redis.pass);
 redisSubscriber.on('error', function (err) {
 	console.error("[redis-subscriber] " + err);
 }).on('connect', function () {
 	console.log("[redis-subscriber] Connected");
-	redisSubscriber.subscribe(config[environment].redis.channels, function () {});
+	redisSubscriber.subscribe(config.redis.channels, function () {});
 }).on('close', function (why) {
 	console.log("[redis-subscriber] " + why);
 }).on('subscribe', function (channel, count) {
@@ -62,7 +55,7 @@ redisSubscriber.on('error', function (err) {
 //
 // APNS GATEWAY
 //
-var apnsGateway = new apn.Connection(config[environment].apns.gateway.options);
+var apnsGateway = new apn.Connection(config.apns.gateway.options);
 apnsGateway.on('error', function (err) {
 	console.error("[apns-gateway] " + err);
 }).on('socketError', function (err) {
@@ -82,7 +75,7 @@ apnsGateway.on('error', function (err) {
 //
 // APNS FEEDBACK
 //
-var apnsFeedback = new apn.Feedback(config[environment].apns.feedback.options);
+var apnsFeedback = new apn.Feedback(config.apns.feedback.options);
 apnsFeedback.on('error', function (err) {
 	console.error("[apns-feedback] " + err);
 }).on('feedback', function (devices) {
@@ -95,15 +88,15 @@ apnsFeedback.on('error', function (err) {
 function processMessage(message) {
 	var worker = new RedisLockingWorker({
 		'client': redisClient,
-		'lockKey' : config[environment].redis.lock.keyPrefix + message.identifier,
+		'lockKey' : config.redis.lock.keyPrefix + message.identifier,
 		'statusLevel' : RedisLockingWorker.StatusLevels.Verbose,
-		'lockTimeout' : config[environment].redis.lock.lockTimeout,
-		'maxAttempts' : config[environment].redis.lock.maxAttempts
+		'lockTimeout' : config.redis.lock.lockTimeout,
+		'maxAttempts' : config.redis.lock.maxAttempts
 	});
 	worker.on("acquired", function (lastAttempt) {
 		console.log("[redis-client] Acquired lock %s", worker.lockKey);
 		dispatchMessage(message);
-		if (config[environment].redis.failoverEnabled)
+		if (config.redis.failoverEnabled)
 			worker.done(lastAttempt);
 		else {
 			console.log("[redis-client] Work complete. Deleting lock %s", worker.lockKey);
@@ -147,7 +140,7 @@ function buildApnsNotification(message) {
 	return note;
 }
 
-if (config[environment].catchExceptions) {
+if (config.catchExceptions) {
 	process.on('uncaughtException', function (err) {
 		console.error('Caught exception: ' + err);
 	});
