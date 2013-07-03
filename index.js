@@ -1,5 +1,6 @@
 /*
-	$ node . [development | production]
+	$ NODE_ENV=development node . 
+	$ NODE_ENV=production node . 
 */
 
 var config = require("./private/config"),
@@ -9,8 +10,7 @@ var config = require("./private/config"),
 	RedisLockingWorker = require("redis-locking-worker"),
 	APNSMessage = require("./lib/message");
 
-var environment = ['development','production'].indexOf(process.argv[2]) === -1
-	? 'development' : process.argv[2];
+var environment = process.env.NODE_ENV || 'development';
 console.log('Running in ' + environment);
 
 config[environment].redis.channels.forEach(function (channel, index) {
