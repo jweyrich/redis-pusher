@@ -75,7 +75,7 @@ c) Edit your private configuration file according to your needs. Change
 
 ###### Run it
 
-	$ node pusher.js development &
+	$ NODE_ENV=development node . &
 	$ redis-cli
 	redis> publish development:push:ios '{ "identifier": 1, "device_token": "<device_token>", "expires": 300, "badge": 1, "sound": "default", "alert": "You have a new message" }'
 
