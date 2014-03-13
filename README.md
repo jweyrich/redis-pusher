@@ -103,12 +103,12 @@ d) Edit your private configuration files according to your needs:
 
 	$ NODE_ENV=development node . &
 	$ redis-cli
-	redis> publish development:push:ios '{ "identifier": 1, "device_token": "<device_token>", "expires": 300, "badge": 1, "sound": "default", "alert": "You have a new message" }'
+	redis> publish development:push:ios '{ "identifier": "a-unique-identifier", "device_token": "<device_token>", "expires": 300, "badge": 1, "sound": "default", "alert": "You have a new message" }'
 
 ##### Message format
 
 	message {
-		identifier: [number] -- Unique identifier
+		identifier: [string] -- Unique identifier
 		device_token: [string]
 		expires: [number] -- Seconds from now
 		badge: [number]
