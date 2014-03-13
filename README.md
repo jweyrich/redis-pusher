@@ -103,16 +103,29 @@ d) Edit your private configuration files according to your needs:
 
 	$ NODE_ENV=development node . &
 	$ redis-cli
-	redis> publish development:push:ios '{ "identifier": "a-unique-identifier", "device_token": "<device_token>", "expires": 300, "badge": 1, "sound": "default", "alert": "You have a new message" }'
+	redis> publish development:push:ios '{ "identifier": "a-unique-identifier", "tokens": [ <device_token>, <anoter_device_token>, ... ], "expires": 300, "badge": 1, "sound": "default", "alert": "You have a new message" }'
+	redis> publish development:push:android '{ "identifier": "another-unique-identifier", "registrationIds": [ <registration_id>, <another_registration_id>, ... ], "collapseKey": "status", "delayWhileIdle": false, "expires": 300, "payload": { "key1": "foo", "key2": "bar" } }'
 
-##### Message format
+##### Message format for iOS
 
 	message {
-		identifier: [string] -- Unique identifier
-		device_token: [string]
-		expires: [number] -- Seconds from now
+		identifier: [string] -- Required. Unique identifier.
+		token: [string or array of string] -- Required. The APNS device token of a recipient device, or an array of them for sending to 1 or more (up to ???).
+		expires: [number] -- Seconds from now.
 		badge: [number]
 		sound: [string]
 		alert: [string]
 		payload: [object]
+	}
+
+##### Message format for Android
+
+	message {
+		identifier: [string] -- Required. Unique identifier.
+		registrationIds: [string or array of string] -- Required. The GCM registration ID of a recipient device, or an array of them for sending to 1 or more devices (up to 1000). When you send a message to multiple registration IDs, that is called a multicast message.
+		collapseKey: [string] -- Optional. If there's an older message with the same collapseKey and registration ID, the older message will be discarded and the new one will take its place.
+		delayWhileIdle: [boolean] -- Optional. Default is false. If the device is connected but idle, the message will still be delivered right away unless the delay_while_idle flag is set to true. Otherwise, it will be stored in the GCM servers until the device is awake. 
+		expires: [number:0..2419200] -- Optional. How long (in seconds) the message should be kept on GCM storage if the device is offline. Requests that don't contain this field default to the maximum period of 4 weeks. When a message times out, it will be discarded from the GCM storage.
+		payload: [object] -- Optional. Custom payload.
+		retryLimit: [number] -- Optional. The maximum number of retries if an error occurs when sending a notification. A value of 0 will attempt sending only once (0 retries).
 	}

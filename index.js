@@ -3,12 +3,14 @@
 	$ NODE_ENV=production node .
 */
 
-var apn = require('apn'),
-	redis = require("redis"),
-	util = require('util'),
-	RedisLockingWorker = require("redis-locking-worker"),
-	APNSMessage = require("./lib/message"),
-	config = require("./config");
+var _ = require('lodash')
+	, notify = require('push-notify')
+	, apn = require('apn')
+	, redis = require("redis")
+	, util = require('util')
+	, RedisLockingWorker = require("redis-locking-worker")
+	, messages = require("./lib/messages")
+	, config = require("./config");
 
 //
 // REDIS MAIN CLIENT
@@ -47,23 +49,32 @@ redisSubscriber.on('error', function (err) {
 }).on('message', function (channel, message) {
 	console.log("[redis-subscriber] Received message: \"%s\"", message);
 	// Error handling elided for brevity
-	var apnsMessage = new APNSMessage(message);
-
-	processMessage(apnsMessage);
+	var msg = buildMessageBasedOnChannel(channel, message);
+	if (msg && msg.compile())
+		processMessage(msg);
 });
+
+function buildMessageBasedOnChannel (channel, message) {
+	var chan = channel.toLowerCase();
+	if (chan.indexOf('gcm') != -1 || chan.indexOf('android') != -1)
+		return new messages.GCMMessage(message);
+	if (chan.indexOf('apns') != -1 || chan.indexOf('ios') != -1  || chan.indexOf('iphone') != -1 )
+		return new messages.APNSMessage(message);
+	return undefined;
+}
 
 //
 // APNS GATEWAY
 //
-var apnsGateway = new apn.Connection(config.apns.gateway.options);
+var apnsGateway = new notify.apn.Sender(config.apns.gateway.options);
 apnsGateway.on('error', function (err) {
 	console.error("[apns-gateway] " + err);
 }).on('socketError', function (err) {
 	console.error("[apns-gateway] " + err);
 }).on('timeout', function (err) {
 	console.error("[apns-gateway] Timeout");
-}).on('transmissionError', function (errCode, notification, recipient) {
-	console.error("[apns-gateway] Transmission error (code %d) for recipient", errCode, recipient);
+}).on('transmissionError', function (errCode, notification, device) {
+	console.error("[apns-gateway] Transmission error (code %d) for recipient (%s)", errCode, device);
 }).on('connected', function (count) {
 	console.log("[apns-gateway] Connected, %d total sockets", count);
 }).on('disconnected', function (count) {
@@ -77,12 +88,35 @@ apnsGateway.on('error', function (err) {
 //
 var apnsFeedback = new apn.Feedback(config.apns.feedback.options);
 apnsFeedback.on('error', function (err) {
+	// Emitted when an error occurs initialising the module. Usually caused by failing to load the certificates.
+	// This is most likely an unrecoverable error.
 	console.error("[apns-feedback] " + err);
-}).on('feedback', function (devices) {
-	devices.forEach(function (item) {
+}).on('feedbackError', function (err) {
+	// Emitted when an error occurs receiving or processing the feedback and in the case of a socket error occurring.
+	// These errors are usually informational and node-apn will automatically recover.
+	console.error("[apns-feedback] " + err);
+}).on('feedback', function (feedbackData) {
+	feedbackData.forEach(function (item) {
+		var time = item[i].time;
+		var device = item[i].device;
+
 		// Do something with item.device and item.time;
-		console.log("[apns-feedback] Should remove device: %s", item.device);
+		console.log("[apns-feedback] Should remove device: %s", device);
 	});
+});
+
+//
+// GCM SENDER
+//
+var gcmSender = new notify.gcm.Sender(config.gcm.options);
+gcmSender.on('error', function (err) {
+	console.error("[gcm-sender] " + err);
+}).on('transmissionError', function (err, registrationId) {
+	console.error("[gcm-sender] Transmission error (code %d) for recipient (%s)", err, registrationId);
+}).on('updated', function (result, registrationIds) {
+	console.log("[gcm-sender] Transmitted %s to device %s", result, registrationIds);
+}).on('transmitted', function (result, registrationIds) {
+	console.log("[gcm-sender] Transmitted %s to device %s", result, registrationIds);
 });
 
 function processMessage(message) {
@@ -95,7 +129,7 @@ function processMessage(message) {
 	});
 	worker.on("acquired", function (lastAttempt) {
 		console.log("[redis-client] Acquired lock %s", worker.lockKey);
-		dispatchMessage(message);
+		message.dispatch();
 		if (config.redis.failoverEnabled)
 			worker.done(lastAttempt);
 		else {
@@ -116,29 +150,21 @@ function processMessage(message) {
 	worker.acquire();
 }
 
-function dispatchMessage(message) {
-	// Does some work to process the message and generate an APNS notification object
-	var notification = buildApnsNotification(message);
+messages.APNSMessage.prototype.dispatch = function () {
+	console.log("[apns-gateway] Sending notification '%s' to device(s) [ %s ]",
+		this.identifier, this.token.join(", "));
 
-	if (notification) {
-		console.log("[apns-gateway] Sending notification '%s' to device %s",
-			message.identifier, message.device_token);
+	// The APNS connection is defined/initialized elsewhere
+	apnsGateway.send(this);
+};
 
-		// The APNS connection is defined/initialized elsewhere
-		apnsGateway.pushNotification(notification, message.device_token);
-	}
-}
+messages.GCMMessage.prototype.dispatch = function () {
+	console.log("[gcm-sender] Sending notification '%s' to device(s) [ %s ]",
+		this.identifier, this.registrationIds.join(", "));
 
-function buildApnsNotification(message) {
-	var note = new apn.Notification();
-	// Expires in `message.expires` seconds from now.
-	note.expiry = Math.floor(Date.now() / 1000) + message.expires;
-	note.badge = message.badge;
-	note.sound = message.sound;
-	note.alert = message.alert;
-	note.payload = message.payload;
-	return note;
-}
+	// The APNS connection is defined/initialized elsewhere
+	gcmSender.send(this);
+};
 
 if (config.catchExceptions) {
 	process.on('uncaughtException', function (err) {
