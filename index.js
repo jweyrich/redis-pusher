@@ -121,7 +121,7 @@ function dispatchMessage(message) {
 	var notification = buildApnsNotification(message);
 
 	if (notification) {
-		console.log("[apns-gateway] Sending notification %d to device %s",
+		console.log("[apns-gateway] Sending notification '%s' to device %s",
 			message.identifier, message.device_token);
 
 		// The APNS connection is defined/initialized elsewhere
