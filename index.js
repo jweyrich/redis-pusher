@@ -47,11 +47,16 @@ redisSubscriber.on('error', function (err) {
         redisSubscriber.end();
     }
 }).on('message', function (channel, message) {
-	console.log("[redis-subscriber] Received message: \"%s\"", message);
+	console.log("[redis-subscriber] Received message: '%s'", message);
 	// Error handling elided for brevity
 	var msg = buildMessageBasedOnChannel(channel, message);
-	if (msg && msg.compile())
-		processMessage(msg);
+	if (msg) {
+		var compiled = msg.compile();
+		if (compiled)
+			processMessage(msg);
+		else
+			console.warn('Invalid message?');
+	}
 });
 
 function buildMessageBasedOnChannel (channel, message) {
