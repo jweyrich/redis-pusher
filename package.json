@@ -1,6 +1,6 @@
 {
 	"name": "redis-pusher",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"description": "A Node.js application that consumes messages published on Redis channels and send them as Push Notifications via APNS/GCM/etc.",
 	"keywords": [ "redis", "sharding", "apple", "push", "notification", "iOS", "apns" ],
 	"author": "Jardel Weyrich <jweyrich@gmail.com>",
