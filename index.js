@@ -118,10 +118,10 @@ gcmSender.on('error', function (err) {
 	console.error("[gcm-sender] " + err);
 }).on('transmissionError', function (err, registrationId) {
 	console.error("[gcm-sender] Transmission error (code %d) for recipient (%s)", err, registrationId);
-}).on('updated', function (result, registrationIds) {
-	console.log("[gcm-sender] Transmitted %s to device %s", result, registrationIds);
-}).on('transmitted', function (result, registrationIds) {
-	console.log("[gcm-sender] Transmitted %s to device %s", result, registrationIds);
+}).on('updated', function (result, registrationId) {
+	console.log("[gcm-sender] Registration ID needs to be updated (%s) ", registrationId);
+}).on('transmitted', function (result, registrationId) {
+	console.log("[gcm-sender] Transmitted %s to device %s", result, registrationId);
 });
 
 function processMessage(message) {
@@ -165,7 +165,7 @@ messages.APNSMessage.prototype.dispatch = function () {
 
 messages.GCMMessage.prototype.dispatch = function () {
 	console.log("[gcm-sender] Sending notification '%s' to device(s) [ %s ]",
-		this.identifier, this.registrationIds.join(", "));
+		this.identifier, this.registrationId.join(", "));
 
 	// The APNS connection is defined/initialized elsewhere
 	gcmSender.send(this);
