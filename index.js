@@ -40,9 +40,9 @@ redisSubscriber.on('error', function (err) {
 }).on('close', function (why) {
 	console.log("[redis-subscriber] " + why);
 }).on('subscribe', function (channel, count) {
-	console.log("[redis-subscriber] Subscribed to %s, %d total subscriptions", channel, count);
+	console.log("[redis-subscriber] Subscribed to '%s', %d total subscriptions", channel, count);
 }).on('unsubscribe', function (channel, count) {
-    console.log("[redis-subscriber] Unsubscribed from %s, %d total subscriptions", channel, count);
+    console.log("[redis-subscriber] Unsubscribed from '%s', %d total subscriptions", channel, count);
     if (count === 0) {
         redisSubscriber.end();
     }
@@ -79,13 +79,13 @@ apnsGateway.on('error', function (err) {
 }).on('timeout', function (err) {
 	console.error("[apns-gateway] Timeout");
 }).on('transmissionError', function (errCode, notification, device) {
-	console.error("[apns-gateway] Transmission error (code %d) for recipient (%s)", errCode, device);
+	console.error("[apns-gateway] Transmission error (code %d) for recipient '%s'", errCode, device);
 }).on('connected', function (count) {
 	console.log("[apns-gateway] Connected, %d total sockets", count);
 }).on('disconnected', function (count) {
 	console.log("[apns-gateway] Disconnected, %d total sockets", count);
 }).on('transmitted', function (notification, recipient) {
-	console.log("[apns-gateway] Transmitted %s to device %s", notification, recipient);
+	console.log("[apns-gateway] Transmitted '%s' to device '%s'", notification, recipient);
 });
 
 //
@@ -106,7 +106,7 @@ apnsFeedback.on('error', function (err) {
 		var device = item[i].device;
 
 		// Do something with item.device and item.time;
-		console.log("[apns-feedback] Should remove device: %s", device);
+		console.log("[apns-feedback] Should remove device: '%s'", device);
 	});
 });
 
@@ -116,12 +116,12 @@ apnsFeedback.on('error', function (err) {
 var gcmSender = new notify.gcm.Sender(config.gcm.options);
 gcmSender.on('error', function (err) {
 	console.error("[gcm-sender] " + err);
-}).on('transmissionError', function (err, registrationId) {
-	console.error("[gcm-sender] Transmission error (code %d) for recipient (%s)", err, registrationId);
+}).on('transmissionError', function (error, registrationId) {
+	console.error("[gcm-sender] Transmission error (%s) for recipient '%s'", error, registrationId);
 }).on('updated', function (result, registrationId) {
-	console.log("[gcm-sender] Registration ID needs to be updated (%s) ", registrationId);
+	console.log("[gcm-sender] Registration ID needs to be updated: '%s'", registrationId);
 }).on('transmitted', function (result, registrationId) {
-	console.log("[gcm-sender] Transmitted %s to device %s", result, registrationId);
+	console.log("[gcm-sender] Transmitted '%s' to device '%s'", result, registrationId);
 });
 
 function processMessage(message) {
@@ -156,7 +156,7 @@ function processMessage(message) {
 }
 
 messages.APNSMessage.prototype.dispatch = function () {
-	console.log("[apns-gateway] Sending notification '%s' to device(s) [ %s ]",
+	console.log("[apns-gateway] Sending notification '%s' to device(s) [ '%s' ]",
 		this.identifier, this.token.join(", "));
 
 	// The APNS connection is defined/initialized elsewhere
@@ -164,7 +164,7 @@ messages.APNSMessage.prototype.dispatch = function () {
 };
 
 messages.GCMMessage.prototype.dispatch = function () {
-	console.log("[gcm-sender] Sending notification '%s' to device(s) [ %s ]",
+	console.log("[gcm-sender] Sending notification '%s' to device(s) [ '%s' ]",
 		this.identifier, this.registrationId.join(", "));
 
 	// The APNS connection is defined/initialized elsewhere
