@@ -168,7 +168,11 @@ messages.GCMMessage.prototype.dispatch = function () {
 		this.identifier, this.registrationId.join(", "));
 
 	// The APNS connection is defined/initialized elsewhere
-	gcmSender.send(this);
+	try {
+		gcmSender.send(this);
+	} catch (err) {
+		console.error("[gcm-sender] node-gcm error: %s", err);
+	}
 };
 
 if (config.catchExceptions) {
