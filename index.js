@@ -63,7 +63,7 @@ function buildMessageBasedOnChannel (channel, message) {
 	var chan = channel.toLowerCase();
 	if (chan.indexOf('gcm') != -1 || chan.indexOf('android') != -1)
 		return new messages.GCMMessage(message);
-	if (chan.indexOf('apns') != -1 || chan.indexOf('ios') != -1  || chan.indexOf('iphone') != -1 )
+	if (chan.indexOf('apns') != -1 || chan.indexOf('ios') != -1 || chan.indexOf('iphone') != -1 || chan.indexOf('ipad') != -1)
 		return new messages.APNSMessage(message);
 	return undefined;
 }
