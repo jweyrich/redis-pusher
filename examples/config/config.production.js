@@ -23,3 +23,8 @@ config.apns.certificate = 'private/aps_production.p12';
 config.apns.passphrase = '<CHANGEME>';
 config.apns.gateway.address = 'gateway.push.apple.com'; // Development
 config.apns.feedback.address = 'feedback.push.apple.com'; // Development
+
+//
+// GCM
+//
+config.gcm.options.key = '<CHANGEME>'; // API key
