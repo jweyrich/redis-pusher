@@ -102,8 +102,8 @@ apnsFeedback.on('error', function (err) {
 	console.error("[apns-feedback] " + err);
 }).on('feedback', function (feedbackData) {
 	feedbackData.forEach(function (item) {
-		var time = item[i].time;
-		var device = item[i].device;
+		var time = item.time;
+		var device = item.device;
 
 		// Do something with item.device and item.time;
 		console.log("[apns-feedback] Should remove device: '%s'", device);
