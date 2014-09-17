@@ -28,3 +28,10 @@ config.apns.feedback.address = 'feedback.push.apple.com'; // Development
 // GCM
 //
 config.gcm.options.key = '<CHANGEME>'; // API key
+
+
+certArray = new Array();
+certArray['<APP_NAME>'] = new Object();
+certArray['<APP_NAME>'].certificate = 'private/aps_development.p12';
+certArray['<APP_NAME>'].passphrase = '<CHANGEME>';
+config.apns.certArray = certArray;

@@ -121,6 +121,7 @@ d) Edit your private configuration files according to your needs:
 ##### Message format for iOS
 
 	message {
+		app: [string]                      -- Required. To specify which app you want to send.
 		identifier: [string]               -- Required. Unique identifier.
 		token: [string or array of string] -- Required. The APNS device token of a recipient device, or
 		                                      an array of them for sending to 1 or more (up to ???).
