@@ -64,7 +64,7 @@ send them as Push Notifications via APNS or GCM.
 
 ##### Clone the repository
 
-	$ git clone git@github.com:jweyrich/redis-pusher.git
+	$ git clone https://github.com/jweyrich/redis-pusher.git
 
 ##### Install the dependencies
 
