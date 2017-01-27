@@ -69,46 +69,60 @@ function buildMessageBasedOnChannel (channel, message) {
 }
 
 //
+
 // APNS GATEWAY
 //
-var apnsGateway = new notify.apn.Sender(config.apns.gateway.options);
-apnsGateway.on('error', function (err) {
-	console.error("[apns-gateway] " + err);
-}).on('socketError', function (err) {
-	console.error("[apns-gateway] " + err);
-}).on('timeout', function (err) {
-	console.error("[apns-gateway] Timeout");
-}).on('transmissionError', function (errCode, notification, device) {
-	console.error("[apns-gateway] Transmission error (code %d) for recipient '%s'", errCode, device);
-}).on('connected', function (count) {
-	console.log("[apns-gateway] Connected, %d total sockets", count);
-}).on('disconnected', function (count) {
-	console.log("[apns-gateway] Disconnected, %d total sockets", count);
-}).on('transmitted', function (notification, recipient) {
-	console.log("[apns-gateway] Transmitted '%s' to device '%s'", notification, recipient);
-});
+var apnsGateway = new Array();
+for (var key in config.apns.certArray) {
+	(function (key, value) {
+		var tempconfig = _.clone(config.apns.gateway.options, true, (function (o) {o.pfx = value.certificate; o.passphrase = value.passphrase;}) )
+		apnsGateway[key] = new notify.apn.Sender(tempconfig);
+		apnsGateway[key].on('error', function (err) {
+			console.error("[apns-gateway] " + err);
+		}).on('socketError', function (err) {
+			console.error("[apns-gateway] " + err);
+		}).on('timeout', function (err) {
+			console.error("[apns-gateway] Timeout");
+		}).on('transmissionError', function (errCode, notification, device) {
+			console.error("[apns-gateway] Transmission error (code %d) for recipient '%s'", errCode, device);
+		}).on('connected', function (count) {
+			console.log("[apns-gateway] Connected, %d total sockets", count);
+		}).on('disconnected', function (count) {
+			console.log("[apns-gateway] Disconnected, %d total sockets", count);
+		}).on('transmitted', function (notification, recipient) {
+			console.log("[apns-gateway] Transmitted '%s' to device '%s'", notification, recipient);
+		});
+	})(key, config.apns.certArray[key]);
+}
 
 //
 // APNS FEEDBACK
 //
-var apnsFeedback = new apn.Feedback(config.apns.feedback.options);
-apnsFeedback.on('error', function (err) {
-	// Emitted when an error occurs initialising the module. Usually caused by failing to load the certificates.
-	// This is most likely an unrecoverable error.
-	console.error("[apns-feedback] " + err);
-}).on('feedbackError', function (err) {
-	// Emitted when an error occurs receiving or processing the feedback and in the case of a socket error occurring.
-	// These errors are usually informational and node-apn will automatically recover.
-	console.error("[apns-feedback] " + err);
-}).on('feedback', function (feedbackData) {
-	feedbackData.forEach(function (item) {
-		var time = item.time;
-		var device = item.device;
+var apnsFeedback = new Array();
 
-		// Do something with item.device and item.time;
-		console.log("[apns-feedback] Should remove device: '%s'", device);
-	});
-});
+for (var key in config.apns.certArray) {
+	(function (key, value) {
+		var tempconfig = _.clone(config.apns.feedback.options, true, (function (o) {o.pfx = value.certificate; o.passphrase = value.passphrase;}) )
+		apnsFeedback[key] = new apn.Feedback(tempconfig);
+		apnsFeedback[key].on('error', function (err) {
+			// Emitted when an error occurs initialising the module. Usually caused by failing to load the certificates.
+			// This is most likely an unrecoverable error.
+			console.error("[apns-feedback] " + err);
+		}).on('feedbackError', function (err) {
+			// Emitted when an error occurs receiving or processing the feedback and in the case of a socket error occurring.
+			// These errors are usually informational and node-apn will automatically recover.
+			console.error("[apns-feedback] " + err);
+		}).on('feedback', function (feedbackData) {
+			feedbackData.forEach(function (item) {
+				var time = item.time;
+				var device = item.device;
+
+				// Do something with item.device and item.time;
+				console.log("[apns-feedback] Should remove device: '%s'", device);
+			});
+		});
+	})(key, config.apns.certArray[key]);
+}
 
 //
 // GCM SENDER
@@ -160,7 +174,7 @@ messages.APNSMessage.prototype.dispatch = function () {
 		this.identifier, this.token.join(", "));
 
 	// The APNS connection is defined/initialized elsewhere
-	apnsGateway.send(this);
+	apnsGateway[this.app].send(this);
 };
 
 messages.GCMMessage.prototype.dispatch = function () {
