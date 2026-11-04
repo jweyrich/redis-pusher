@@ -23,6 +23,7 @@
 		"index.js",
 		"lib/",
 		"bin/",
+		"schemas/",
 		"examples/"
 	],
 	"repository": {
@@ -42,5 +43,8 @@
 	},
 	"dependencies": {
 		"@redis/client": "^6.3.1"
+	},
+	"devDependencies": {
+		"ajv": "^8.20.0"
 	}
 }

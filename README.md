@@ -178,6 +178,7 @@ As with any Node.js `EventEmitter`, an `error` event with no listener throws.
 - `RedisPusher.APNSMessage`, `RedisPusher.FCMMessage`: the message classes.
 - `RedisPusher.createMessage(platform, data)`: builds and validates a message, or throws.
 - `RedisPusher.defaults`: the default options (read-only).
+- `RedisPusher.schemas`: the JSON Schemas for APNS and FCM messages. See "Message formats".
 
 ### Options
 
@@ -294,67 +295,52 @@ defaults to `development`):
 The CLI logs to the console and prints the devices reported as unregistered.
 Stop it with Ctrl-C or SIGTERM.
 
-## Message format for iOS (APNS)
+## Message formats
 
-	message {
-		identifier: [string]               -- Unique identifier. Required for messages published via Redis
-		                                      (it's the lock key).
-		token: [string or array of string] -- Required. The hex device token(s).
-		alert: [string or object]          -- e.g. "Hello" or { "title": "...", "body": "..." }
-		badge: [number]
-		sound: [string or object]
-		category: [string]
-		threadId: [string]
-		contentAvailable: [boolean]        -- A background (silent) push when there's no alert/badge/sound.
-		mutableContent: [boolean]
-		payload: [object]                  -- Custom keys, sent next to `aps`.
-		aps: [object]                      -- Extra `aps` keys, e.g. { "interruption-level": "time-sensitive" }.
-		expiry: [number]                   -- Seconds from now. 0 means "deliver once, don't store".
-		priority: [10, 5 or 1]             -- Default: 10, or 5 for background pushes.
-		pushType: [string]                 -- Default: 'background' for silent pushes, else 'alert'.
-		topic: [string]                    -- Overrides `apns.topic`.
-		collapseId: [string]
-	}
+Messages are JSON objects. Their formats are defined as JSON Schemas, with a
+description of every field:
 
-The JSON payload is limited to 4 KB.
+- APNS: [`schemas/apns-message.schema.json`](schemas/apns-message.schema.json)
+- FCM: [`schemas/fcm-message.schema.json`](schemas/fcm-message.schema.json)
 
-## Message format for Android (FCM)
+Publishers written in any language can validate messages against them before
+publishing, using a JSON Schema library for that language. Many editors also use
+them to autocomplete fields. In Node.js, they're available as
+`require('redis-pusher').schemas.apns` and `.fcm`.
 
-	message {
-		identifier: [string]               -- Unique identifier. Required for messages published via Redis
-		                                      (it's the lock key).
-		token: [string or array of string] -- Required. The FCM registration token(s). `registrationId`
-		                                      is accepted too.
-		notification: [object]             -- { "title": "...", "body": "...", "image": "..." }
-		data: [object]                     -- Custom data. FCM only accepts string values, so other
-		                                      values are sent JSON-encoded.
-		collapseKey: [string]              -- Newer messages replace older ones with the same key.
-		timeToLive: [number:0..2419200]    -- Seconds to keep the message if the device is offline.
-		priority: ['high' or 'normal']
-		android: [object]                  -- These four are passed through to the FCM v1 message as-is,
-		apns: [object]                        see https://firebase.google.com/docs/reference/fcm/rest/v1/projects.messages
-		webpush: [object]
-		fcmOptions: [object]
-	}
+An APNS message:
 
-## Migrating from 0.2
+```json
+{
+	"identifier": "msg-1",
+	"token": "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90",
+	"alert": { "title": "Hello!", "body": "You have a new message" },
+	"badge": 1,
+	"sound": "default",
+	"payload": { "conversationId": "42" }
+}
+```
 
-- **GCM is gone.** Google shut it down, so legacy server keys no longer work.
-  Replace `gcm: { options: { key } }` with `fcm: { serviceAccount }`. The `'gcm'`
-  platform name and the GCM message fields (`registrationId`, `collapseKey`,
-  `timeToLive`, `data`) still work. `delayWhileIdle` is ignored.
-- **APNS uses the HTTP/2 API.** A `.p12` certificate still works. Add `topic`,
-  and set `production: false` for the sandbox (a legacy sandbox
-  `gateway.address` is still recognised). Device tokens must be hex strings.
-- **The `feedback` and `registrationUpdated` events are gone.** Apple retired the
-  feedback service, and FCM v1 has no canonical IDs. Listen for `unregistered`.
-- **`send()` returns a Promise of results** instead of the message.
-- **Redis client.** redis-pusher now uses the current Redis client
-  ([`@redis/client`](https://www.npmjs.com/package/@redis/client)) instead of
-  `redis@0.8`. `redis.host`, `redis.port` and `redis.pass` work as before, and
-  `redis.url`, `redis.username` and `redis.password` are new. If you set
-  `redis.options`, they are now passed to the new client.
-- **Node.js 22 or later is required.**
+An FCM message:
+
+```json
+{
+	"identifier": "msg-2",
+	"token": [ "registration-token-1", "registration-token-2" ],
+	"notification": { "title": "Hello!", "body": "You have a new message" },
+	"data": { "conversationId": "42" },
+	"priority": "high"
+}
+```
+
+A few rules aren't expressed in the schemas, and redis-pusher checks them itself:
+
+- `identifier` is required for messages published via Redis. It's the lock key
+  that makes sure only one instance delivers each message.
+- An APNS message's JSON payload is limited to 4 KB.
+
+The schemas reject unknown fields, to catch typos such as `tokens`. redis-pusher
+itself ignores unknown fields.
 
 ## Running the tests
 

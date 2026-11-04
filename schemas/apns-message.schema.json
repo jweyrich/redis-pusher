@@ -1,0 +1,94 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://raw.githubusercontent.com/jweyrich/redis-pusher/master/schemas/apns-message.schema.json",
+	"title": "redis-pusher APNS message",
+	"description": "A message published on a channel mapped to 'apns', or passed to pusher.send('apns', message). Also checked by redis-pusher, which additionally requires `identifier` for messages published via Redis and limits the resulting JSON payload to 4 KB. redis-pusher ignores unknown fields, but this schema rejects them to catch typos.",
+	"type": "object",
+	"required": [ "token" ],
+	"additionalProperties": false,
+	"properties": {
+		"identifier": {
+			"description": "Unique identifier. Required for messages published via Redis, where it's the lock key that makes sure only one instance delivers the message.",
+			"type": [ "string", "number" ]
+		},
+		"token": {
+			"description": "The hex device token of the recipient, or an array of them.",
+			"oneOf": [
+				{ "$ref": "#/$defs/deviceToken" },
+				{ "type": "array", "items": { "$ref": "#/$defs/deviceToken" }, "minItems": 1 }
+			]
+		},
+		"alert": {
+			"description": "The alert text, or an object such as { \"title\": \"...\", \"body\": \"...\" }.",
+			"type": [ "string", "object" ]
+		},
+		"badge": {
+			"description": "The number to show on the app icon. 0 removes the badge.",
+			"type": "integer",
+			"minimum": 0
+		},
+		"sound": {
+			"description": "The sound file name (e.g. \"default\"), or a critical-alert sound object.",
+			"type": [ "string", "object" ]
+		},
+		"category": {
+			"description": "The notification category (actionable notifications).",
+			"type": "string"
+		},
+		"threadId": {
+			"description": "Groups related notifications (aps.thread-id).",
+			"type": "string"
+		},
+		"contentAvailable": {
+			"description": "Wake the app in the background (aps.content-available). Without alert, badge or sound, this is a silent background push.",
+			"type": "boolean"
+		},
+		"mutableContent": {
+			"description": "Let a notification service extension modify the notification (aps.mutable-content).",
+			"type": "boolean"
+		},
+		"payload": {
+			"description": "Custom keys, sent at the top level of the payload next to `aps`.",
+			"type": "object"
+		},
+		"aps": {
+			"description": "Extra `aps` keys, e.g. { \"interruption-level\": \"time-sensitive\" }.",
+			"type": "object"
+		},
+		"expiry": {
+			"description": "Seconds from now until the notification is no longer valid. 0 means deliver once and don't store it.",
+			"type": "integer",
+			"minimum": 0
+		},
+		"priority": {
+			"description": "10 delivers immediately, 5 saves power, 1 prioritizes power over everything. Default: 10, or 5 for background pushes.",
+			"enum": [ 10, 5, 1 ]
+		},
+		"pushType": {
+			"description": "The apns-push-type header, e.g. \"alert\", \"background\", \"voip\" or \"liveactivity\". Default: \"background\" for silent pushes, else \"alert\".",
+			"type": "string"
+		},
+		"topic": {
+			"description": "The apns-topic header. Overrides the `apns.topic` option, e.g. for VoIP pushes (\"com.example.app.voip\").",
+			"type": "string"
+		},
+		"collapseId": {
+			"description": "Notifications with the same collapse ID replace each other on the device.",
+			"type": "string"
+		},
+		"retryLimit": {
+			"description": "Ignored. Retries are configured with the `apns.retries` option.",
+			"deprecated": true
+		}
+	},
+	"$defs": {
+		"deviceToken": {
+			"type": "string",
+			"pattern": "^[0-9a-fA-F]+$"
+		}
+	},
+	"examples": [
+		{ "identifier": "msg-1", "token": "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90", "alert": "Hello!", "badge": 1, "sound": "default" },
+		{ "identifier": "sync-42", "token": [ "a1b2c3d4", "e5f60718" ], "contentAvailable": true, "payload": { "sync": "inbox" } }
+	]
+}

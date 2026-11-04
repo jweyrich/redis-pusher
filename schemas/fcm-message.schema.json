@@ -1,0 +1,91 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://raw.githubusercontent.com/jweyrich/redis-pusher/master/schemas/fcm-message.schema.json",
+	"title": "redis-pusher FCM message",
+	"description": "A message published on a channel mapped to 'fcm', or passed to pusher.send('fcm', message). Also checked by redis-pusher, which additionally requires `identifier` for messages published via Redis. redis-pusher ignores unknown fields, but this schema rejects them to catch typos.",
+	"type": "object",
+	"anyOf": [
+		{ "required": [ "token" ] },
+		{ "required": [ "registrationId" ] }
+	],
+	"additionalProperties": false,
+	"properties": {
+		"identifier": {
+			"description": "Unique identifier. Required for messages published via Redis, where it's the lock key that makes sure only one instance delivers the message.",
+			"type": [ "string", "number" ]
+		},
+		"token": {
+			"description": "The FCM registration token of the recipient, or an array of them.",
+			"$ref": "#/$defs/tokens"
+		},
+		"registrationId": {
+			"description": "Legacy GCM name for `token`.",
+			"$ref": "#/$defs/tokens",
+			"deprecated": true
+		},
+		"notification": {
+			"description": "The notification shown by the system.",
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"title": { "type": "string" },
+				"body": { "type": "string" },
+				"image": { "description": "URL of an image to show in the notification.", "type": "string" }
+			}
+		},
+		"data": {
+			"description": "Custom data for the app. FCM only accepts string values, so other values are sent JSON-encoded.",
+			"type": "object"
+		},
+		"collapseKey": {
+			"description": "Newer messages replace older ones with the same key (android.collapse_key).",
+			"type": "string"
+		},
+		"timeToLive": {
+			"description": "Seconds to keep the message if the device is offline, up to 4 weeks (android.ttl).",
+			"type": "number",
+			"minimum": 0,
+			"maximum": 2419200
+		},
+		"priority": {
+			"description": "Android delivery priority (android.priority).",
+			"enum": [ "high", "normal" ]
+		},
+		"android": {
+			"description": "Passed through as the FCM v1 `android` field. See https://firebase.google.com/docs/reference/fcm/rest/v1/projects.messages#androidconfig",
+			"type": "object"
+		},
+		"apns": {
+			"description": "Passed through as the FCM v1 `apns` field, for iOS devices reached through FCM.",
+			"type": "object"
+		},
+		"webpush": {
+			"description": "Passed through as the FCM v1 `webpush` field.",
+			"type": "object"
+		},
+		"fcmOptions": {
+			"description": "Passed through as the FCM v1 `fcm_options` field, e.g. { \"analytics_label\": \"...\" }.",
+			"type": "object"
+		},
+		"delayWhileIdle": {
+			"description": "Ignored. FCM no longer supports it.",
+			"deprecated": true
+		}
+	},
+	"$defs": {
+		"token": {
+			"type": "string",
+			"pattern": "\\S"
+		},
+		"tokens": {
+			"oneOf": [
+				{ "$ref": "#/$defs/token" },
+				{ "type": "array", "items": { "$ref": "#/$defs/token" }, "minItems": 1 }
+			]
+		}
+	},
+	"examples": [
+		{ "identifier": "msg-2", "token": "dGVzdC10b2tlbg:APA91b...", "notification": { "title": "Hello!", "body": "You have a new message" } },
+		{ "identifier": "order-7", "token": [ "token1", "token2" ], "data": { "orderId": "7" }, "collapseKey": "orders", "priority": "high" }
+	]
+}
