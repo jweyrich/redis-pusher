@@ -22,6 +22,8 @@ describe('Pusher', () => {
 	let sent;
 	before(() => { sent = stubSenders(); });
 	after(() => sent.restore());
+	// Reset is repeated in each nested suite below because Node 18.16 doesn't
+	// run a parent suite's beforeEach hooks for tests in nested suites.
 	beforeEach(() => sent.reset());
 
 	it('can be created with or without `new`', () => {
@@ -38,6 +40,7 @@ describe('Pusher', () => {
 	});
 
 	describe('send()', () => {
+		beforeEach(() => sent.reset());
 		it('validates and dispatches a GCM message', () => {
 			const pusher = RedisPusher({ gcm: GCM });
 			const events = recorder(pusher, [ 'sent' ]);
@@ -91,6 +94,7 @@ describe('Pusher', () => {
 	});
 
 	describe('GCM events', () => {
+		beforeEach(() => sent.reset());
 		it('re-emits transmitted, transmissionError and registrationUpdated', () => {
 			const pusher = RedisPusher({ gcm: GCM });
 			const events = recorder(pusher, [ 'transmitted', 'transmissionError', 'registrationUpdated' ]);
@@ -125,6 +129,7 @@ describe('Pusher', () => {
 	});
 
 	describe('APNS events', () => {
+		beforeEach(() => sent.reset());
 		const device = { toString: () => 'abcdef' };
 
 		it('re-emits transmitted and transmissionError with the token as a string', () => {
@@ -160,6 +165,7 @@ describe('Pusher', () => {
 	});
 
 	describe('logger', () => {
+		beforeEach(() => sent.reset());
 		it('is silent by default and uses the given logger otherwise', () => {
 			const lines = [];
 			const logger = { log: (...a) => lines.push(a), warn: (...a) => lines.push(a), error: (...a) => lines.push(a) };
@@ -172,6 +178,7 @@ describe('Pusher', () => {
 	});
 
 	describe('start() / stop()', () => {
+		beforeEach(() => sent.reset());
 		it('fails to start without channels', (t, done) => {
 			RedisPusher({ gcm: GCM }).start((err) => {
 				assert.match(err.message, /No channels configured/);

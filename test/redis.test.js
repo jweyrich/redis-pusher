@@ -12,7 +12,7 @@ const { stubSenders, eventually, startRedis, redisAvailable, start, stop, comman
 const APNS = { certificate: Buffer.from('fake'), feedback: { enabled: false } };
 const GCM = { options: { key: 'key' } };
 
-describe('with Redis', { skip: !redisAvailable && 'redis-server is not installed' }, () => {
+describe('with Redis', { skip: !redisAvailable && 'redis-server is not installed', timeout: 30000 }, () => {
 	let server, publisher, sent;
 	const pushers = [];
 

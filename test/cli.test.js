@@ -19,7 +19,7 @@ function run(args, options) {
 	return child;
 }
 
-describe('redis-pusher CLI', () => {
+describe('redis-pusher CLI', { timeout: 30000 }, () => {
 	let dir;
 	before(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'redis-pusher-cli-')); });
 	after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -51,7 +51,7 @@ describe('redis-pusher CLI', () => {
 		assert.match(child.output, /No channels configured/);
 	});
 
-	describe('with Redis', { skip: !redisAvailable && 'redis-server is not installed' }, () => {
+	describe('with Redis', { skip: !redisAvailable && 'redis-server is not installed', timeout: 30000 }, () => {
 		let server;
 		before(async () => { server = await startRedis(); });
 		after(async () => { await server.stop(); });

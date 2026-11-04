@@ -10,6 +10,8 @@ and sends them as Push Notifications via APNS or GCM.
 
 ## Install
 
+Requires Node.js 16 or later.
+
 	$ npm install redis-pusher
 
 ## Usage as a library
