@@ -35,13 +35,15 @@ const redisAvailable = !!process.env.REDIS_PORT ||
 	!spawnSync('redis-server', [ '--version' ]).error;
 
 // Start a throwaway redis-server on a free port (no persistence), or reuse the
-// one at $REDIS_PORT. Resolves to { port, client(), stop() }.
+// one at $REDIS_PORT. Resolves to { port, client(), stop() }, where `client()`
+// resolves to a connected @redis/client.
 async function startRedis() {
-	const redis = require('redis');
+	const { createClient } = require('@redis/client');
+	const connect = (port) => createClient({ socket: { host: '127.0.0.1', port } }).connect();
 
 	if (process.env.REDIS_PORT) {
 		const port = Number(process.env.REDIS_PORT);
-		return { port, client: () => redis.createClient(port, '127.0.0.1'), stop: async () => {} };
+		return { port, client: () => connect(port), stop: async () => {} };
 	}
 
 	const port = await freePort();
@@ -70,7 +72,7 @@ async function startRedis() {
 
 	return {
 		port,
-		client: () => redis.createClient(port, '127.0.0.1'),
+		client: () => connect(port),
 		stop: () => new Promise((resolve) => {
 			process.removeListener('exit', kill);
 			child.removeAllListeners('exit');
@@ -91,14 +93,7 @@ const start = (pusher, timeout = 3000) => new Promise((resolve, reject) => {
 });
 const stop = (pusher) => new Promise((resolve, reject) => pusher.stop((err) => err ? reject(err) : resolve()));
 
-// Run a redis command on a redis@0.8 client and resolve with the reply.
-// Falls back to send_command() for commands the old client has no method for.
-const command = (client, name, ...args) => new Promise((resolve, reject) => {
-	const callback = (err, reply) => err ? reject(err) : resolve(reply);
-	if (typeof client[name] === 'function')
-		client[name](...args, callback);
-	else
-		client.send_command(name, args, callback);
-});
+// Run a raw redis command, e.g. command(client, 'PUBSUB', 'NUMSUB', 'channel').
+const command = (client, ...args) => client.sendCommand(args.map(String));
 
 module.exports = { eventually, startRedis, redisAvailable, start, stop, command };

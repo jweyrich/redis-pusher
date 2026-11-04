@@ -125,6 +125,20 @@ describe('options', () => {
 		});
 	});
 
+	describe('redis', () => {
+		it('defaults to 127.0.0.1:6379 with no credentials', () => {
+			const { redis } = RedisPusher({}).options;
+			assert.deepEqual([ redis.url, redis.host, redis.port, redis.username, redis.password ],
+				[ undefined, '127.0.0.1', 6379, undefined, undefined ]);
+		});
+
+		it('validates the lock settings', () => {
+			assert.throws(() => RedisPusher({ redis: { lock: { lockTimeout: 0 } } }), /lockTimeout must be a positive number/);
+			assert.throws(() => RedisPusher({ redis: { lock: { maxAttempts: 0 } } }), /maxAttempts must be an integer >= 1/);
+			assert.throws(() => RedisPusher({ redis: { lock: { maxAttempts: 1.5 } } }), /maxAttempts/);
+		});
+	});
+
 	describe('redis.channels', () => {
 		it('accepts an object mapping channels to platforms, with `gcm` as an alias', () => {
 			const { options } = RedisPusher({ apns: APNS, fcm: FCM, redis: { channels: { one: 'apns', two: 'fcm', three: 'gcm' } } });

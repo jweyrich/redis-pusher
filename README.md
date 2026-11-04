@@ -193,15 +193,17 @@ Anything you don't set falls back to its default.
 
 | Option                  | Default        | Description |
 |-------------------------|----------------|-------------|
+| `redis.url`             | –              | e.g. `'redis://user:secret@host:6379/0'`, or `'rediss://...'` for TLS. Takes precedence over `host` and `port`. |
 | `redis.host`            | `'127.0.0.1'`  | |
 | `redis.port`            | `6379`         | |
-| `redis.pass`            | `''`           | Password, or `''` if none. |
-| `redis.options`         | `{}`           | Passed to `redis.createClient()`. |
+| `redis.username`        | –              | Redis 6+ ACL user. |
+| `redis.password`        | –              | `redis.pass` is accepted too. |
+| `redis.options`         | `{}`           | Passed to `createClient()` from [`@redis/client`](https://www.npmjs.com/package/@redis/client), e.g. `{ database: 2, socket: { tls: true } }`. |
 | `redis.channels`        | `[]`           | Channels to subscribe to. Either an object mapping each channel to its platform, e.g. `{ 'push:ios': 'apns', 'push:android': 'fcm' }`, or an array of names, in which case the platform is guessed from the name: `apns`, `ios`, `iphone` or `ipad` → APNS, and `fcm`, `gcm` or `android` → FCM. |
 | `redis.failoverEnabled` | `false`        | See "Failover redundancy". |
 | `redis.lock.keyPrefix`  | `'push_lock_'` | |
-| `redis.lock.lockTimeout`| `5000`         | Milliseconds. |
-| `redis.lock.maxAttempts`| `5`            | |
+| `redis.lock.lockTimeout`| `5000`         | Milliseconds. How long a lock outlives an instance that died while holding it, and how often standby instances check on it. |
+| `redis.lock.maxAttempts`| `5`            | With failover, how many instances may try to deliver the same message in turn. |
 
 #### APNS
 
@@ -247,12 +249,25 @@ different `redis.channels`.
 
 ### Failover redundancy
 
-Multiple instances can subscribe to the same channel(s) at the same time. A
-Redis lock keyed on the message `identifier` makes sure only one of them sends
-each message. The lock is held until delivery has been attempted, so if the
-instance holding it dies, a standby instance takes over. All instances sharing
-the same channel(s) must use the same `redis.lock.keyPrefix` and set
-`redis.failoverEnabled` to `true`.
+Multiple instances can subscribe to the same channel(s) at the same time. All
+instances sharing the same channel(s) must use the same `redis.lock.keyPrefix`
+and set `redis.failoverEnabled` to `true`.
+
+A Redis lock keyed on the message `identifier` makes sure only one of them sends
+each message:
+
+- The instance that gets the lock delivers the message, and keeps renewing the
+  lock while it works, however long that takes.
+- The others wait as standbys and check the lock every `redis.lock.lockTimeout`.
+- If the instance holding the lock dies, the lock expires within
+  `lockTimeout`, and a standby takes over and delivers the message. This repeats
+  up to `redis.lock.maxAttempts` times.
+- Once a message has been delivered, the lock is marked as done for
+  `lockTimeout × (maxAttempts + 1)`, so late standbys skip it. Publishing the same
+  `identifier` again within that window is ignored.
+
+Without failover, instances that don't get the lock simply skip the message,
+and the lock is released as soon as delivery has been attempted.
 
 ### What redis-pusher does not attempt to do
 
@@ -334,6 +349,11 @@ The JSON payload is limited to 4 KB.
 - **The `feedback` and `registrationUpdated` events are gone.** Apple retired the
   feedback service, and FCM v1 has no canonical IDs. Listen for `unregistered`.
 - **`send()` returns a Promise of results** instead of the message.
+- **Redis client.** redis-pusher now uses the current Redis client
+  ([`@redis/client`](https://www.npmjs.com/package/@redis/client)) instead of
+  `redis@0.8`. `redis.host`, `redis.port` and `redis.pass` work as before, and
+  `redis.url`, `redis.username` and `redis.password` are new. If you set
+  `redis.options`, they are now passed to the new client.
 - **Node.js 22 or later is required.**
 
 ## Running the tests
