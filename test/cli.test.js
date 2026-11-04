@@ -7,6 +7,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { startRedis, redisAvailable, eventually } = require('./helpers');
+const { generateCredentials } = require('./mocks');
 
 const BIN = path.join(__dirname, '..', 'bin', 'redis-pusher.js');
 
@@ -58,8 +59,8 @@ describe('redis-pusher CLI', { timeout: 30000 }, () => {
 
 		it('subscribes, then shuts down cleanly on SIGTERM', async () => {
 			const config = writeConfig('good.js', {
-				redis: { port: server.port, channels: { 'cli:android': 'gcm' } },
-				gcm: { options: { key: 'key' } }
+				redis: { port: server.port, channels: { 'cli:android': 'fcm' } },
+				fcm: { serviceAccount: generateCredentials().fcm.serviceAccount }
 			});
 			const child = run([ config ]);
 			await eventually(() => /Subscribed to 'cli:android'/.test(child.output), 5000);

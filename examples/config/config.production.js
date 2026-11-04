@@ -13,20 +13,26 @@ config.catchExceptions = true;
 // Redis
 //
 config.redis.channels = {
-	'production:push:ios': 'apns'
+	'production:push:ios': 'apns',
+	'production:push:android': 'fcm'
 };
 
 //
 // APNS
 //
 config.apns = {
-	certificate: 'private/aps_production.p12', // Path or Buffer.
-	passphrase: '<CHANGEME>',
-	gateway: { address: 'gateway.push.apple.com' },
-	feedback: { address: 'feedback.push.apple.com' }
+	key: 'private/AuthKey_<KEY_ID>.p8',
+	keyId: '<CHANGEME>',
+	teamId: '<CHANGEME>',
+	topic: 'com.example.app',
+	production: true
+	// Or, with a certificate instead of a .p8 key:
+	// certificate: 'private/aps_production.p12', passphrase: '<CHANGEME>', topic: 'com.example.app'
 };
 
 //
-// GCM -- disabled in this environment.
+// FCM
 //
-config.gcm = false;
+config.fcm = {
+	serviceAccount: 'private/firebase-service-account.json'
+};

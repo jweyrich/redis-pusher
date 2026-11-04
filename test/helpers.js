@@ -5,39 +5,18 @@
 
 const { spawn, spawnSync } = require('node:child_process');
 const net = require('node:net');
-const notify = require('push-notify');
 
-// Replace the APNS/GCM senders' `send()` so nothing hits the network.
-// Each call is recorded as { sender, message }; tests can make the sender
-// emit events (e.g. `call.sender.emit('transmitted', ...)`) to simulate replies.
-function stubSenders() {
-	const sent = { apns: [], gcm: [] };
-	const original = {
-		apns: notify.apn.Sender.prototype.send,
-		gcm: notify.gcm.Sender.prototype.send
-	};
-	notify.apn.Sender.prototype.send = function (message) { sent.apns.push({ sender: this, message }); };
-	notify.gcm.Sender.prototype.send = function (message) { sent.gcm.push({ sender: this, message }); };
-	sent.reset = () => { sent.apns.length = 0; sent.gcm.length = 0; };
-	sent.restore = () => {
-		notify.apn.Sender.prototype.send = original.apns;
-		notify.gcm.Sender.prototype.send = original.gcm;
-	};
-	return sent;
-}
-
-// Resolve once `predicate()` is truthy, or reject after `timeout` ms.
-function eventually(predicate, timeout = 3000, interval = 20) {
+// Resolve once `predicate()` (which may be async) is truthy, or reject after `timeout` ms.
+async function eventually(predicate, timeout = 3000, interval = 20) {
 	const deadline = Date.now() + timeout;
-	return new Promise((resolve, reject) => {
-		(function check() {
-			let value;
-			try { value = predicate(); } catch (err) { return reject(err); }
-			if (value) return resolve(value);
-			if (Date.now() > deadline) return reject(new Error('Timed out waiting for condition: ' + predicate));
-			setTimeout(check, interval);
-		})();
-	});
+	for (;;) {
+		const value = await predicate();
+		if (value)
+			return value;
+		if (Date.now() > deadline)
+			throw new Error('Timed out waiting for condition: ' + predicate);
+		await new Promise((resolve) => setTimeout(resolve, interval));
+	}
 }
 
 function freePort() {
@@ -122,4 +101,4 @@ const command = (client, name, ...args) => new Promise((resolve, reject) => {
 		client.send_command(name, args, callback);
 });
 
-module.exports = { stubSenders, eventually, startRedis, redisAvailable, start, stop, command };
+module.exports = { eventually, startRedis, redisAvailable, start, stop, command };

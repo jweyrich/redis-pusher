@@ -1,30 +1,41 @@
 'use strict';
 //
-// Pusher behaviour that does not need a Redis server.
+// Pusher API behaviour that does not need a Redis server.
 //
 
 const { describe, it, before, after, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
+const { spawn } = require('node:child_process');
+const path = require('node:path');
 const RedisPusher = require('..');
-const { stubSenders } = require('./helpers');
+const { generateCredentials, startMockAPNS, startMockFCM, apnsOptions, fcmOptions } = require('./mocks');
 
-const APNS = { certificate: Buffer.from('fake'), feedback: { enabled: false } };
-const GCM = { options: { key: 'key' } };
+const credentials = generateCredentials();
 
-function recorder(pusher, names) {
-	const events = [];
-	for (const name of names)
-		pusher.on(name, (...args) => events.push([ name, ...args ]));
-	return events;
-}
+describe('Pusher', { timeout: 30000 }, () => {
+	let apns, fcm;
+	const pushers = [];
 
-describe('Pusher', () => {
-	let sent;
-	before(() => { sent = stubSenders(); });
-	after(() => sent.restore());
-	// Reset is repeated in each nested suite below because Node 18.16 doesn't
-	// run a parent suite's beforeEach hooks for tests in nested suites.
-	beforeEach(() => sent.reset());
+	const createPusher = (options = {}) => {
+		const pusher = RedisPusher(Object.assign({
+			apns: apnsOptions(credentials, apns),
+			fcm: fcmOptions(credentials, fcm)
+		}, options));
+		pushers.push(pusher);
+		return pusher;
+	};
+
+	before(async () => {
+		[ apns, fcm ] = await Promise.all([ startMockAPNS(credentials.apns), startMockFCM(credentials.fcm) ]);
+	});
+	after(async () => {
+		await Promise.all(pushers.map((pusher) => new Promise((resolve) => pusher.stop(resolve))));
+		await Promise.all([ apns.close(), fcm.close() ]);
+	});
+	beforeEach(() => {
+		apns.respond = () => ({ status: 200 });
+		fcm.respond = () => ({ status: 200 });
+	});
 
 	it('can be created with or without `new`', () => {
 		assert.ok(new RedisPusher({}) instanceof RedisPusher.Pusher);
@@ -32,155 +43,98 @@ describe('Pusher', () => {
 		assert.ok(RedisPusher.createPusher({}) instanceof RedisPusher.Pusher);
 	});
 
-	it('does not connect anywhere until started', () => {
-		const pusher = RedisPusher({ gcm: GCM, redis: { channels: [ 'a:android' ] } });
+	it('does not connect anywhere until used', () => {
+		const pusher = createPusher({ redis: { channels: [ 'a:android' ] } });
 		assert.equal(pusher.running, false);
 		assert.equal(pusher._client, null);
-		assert.equal(pusher._subscriber, null);
+		assert.equal(pusher._transports.fcm.client.session, null);
 	});
 
 	describe('send()', () => {
-		beforeEach(() => sent.reset());
-		it('validates and dispatches a GCM message', () => {
-			const pusher = RedisPusher({ gcm: GCM });
-			const events = recorder(pusher, [ 'sent' ]);
-			const message = pusher.send('gcm', { registrationId: 'r1', data: { a: 1 } });
-
-			assert.equal(sent.gcm.length, 1);
-			assert.strictEqual(sent.gcm[0].message, message);
-			assert.deepEqual(message.registrationId, [ 'r1' ]);
-			assert.deepEqual(events, [ [ 'sent', message ] ]);
+		it('resolves with one result per recipient', async () => {
+			const results = await createPusher().send('apns', { token: [ 'aa', 'bb' ], alert: 'x' });
+			assert.equal(results.length, 2);
+			assert.deepEqual(results.map((r) => [ r.platform, r.recipient, r.ok ]), [ [ 'apns', 'aa', true ], [ 'apns', 'bb', true ] ]);
 		});
 
-		it('validates and dispatches an APNS message from JSON', () => {
-			const pusher = RedisPusher({ apns: APNS });
-			pusher.send('apns', '{"token":["t1","t2"],"alert":"hi"}');
-			assert.equal(sent.apns.length, 1);
-			assert.deepEqual(sent.apns[0].message.token, [ 't1', 't2' ]);
+		it('accepts a callback instead', (t, done) => {
+			const returned = createPusher().send('fcm', { token: 't' }, (err, results) => {
+				assert.equal(err, null);
+				assert.equal(results[0].ok, true);
+				done();
+			});
+			assert.equal(returned, undefined);
 		});
 
-		it('accepts a message instance', () => {
-			const pusher = RedisPusher({ gcm: GCM });
-			const message = new RedisPusher.GCMMessage({ registrationId: 'r' });
-			assert.strictEqual(pusher.send('gcm', message), message);
-			assert.deepEqual(message.registrationId, [ 'r' ]);
+		it('passes validation errors to the callback', (t, done) => {
+			createPusher().send('fcm', { data: {} }, (err) => {
+				assert.match(err.message, /`token`/);
+				done();
+			});
 		});
 
-		it('reuses one sender per platform', () => {
-			const pusher = RedisPusher({ gcm: GCM });
-			pusher.send('gcm', { registrationId: 'a' });
-			pusher.send('gcm', { registrationId: 'b' });
-			assert.strictEqual(sent.gcm[0].sender, sent.gcm[1].sender);
+		it('accepts JSON, message instances, and the `gcm` alias', async () => {
+			const pusher = createPusher();
+			assert.equal((await pusher.send('apns', '{"token":"aa","alert":"x"}'))[0].ok, true);
+			assert.equal((await pusher.send('fcm', new RedisPusher.FCMMessage({ token: 't' })))[0].ok, true);
+			assert.equal((await pusher.send('gcm', { registrationId: 'r' }))[0].platform, 'fcm');
 		});
 
-		it('throws for a platform that is not configured', () => {
-			const pusher = RedisPusher({ gcm: GCM });
-			assert.throws(() => pusher.send('apns', { token: 't' }), /apns is not configured/);
-			assert.equal(sent.apns.length, 0);
+		it('rejects invalid messages, unconfigured platforms and mismatched messages', async () => {
+			const pusher = createPusher({ apns: false });
+			await assert.rejects(pusher.send('fcm', { data: {} }), /`token`/);
+			await assert.rejects(pusher.send('fcm', 'not json'), SyntaxError);
+			await assert.rejects(pusher.send('apns', { token: 'aa' }), /apns is not configured/);
+			await assert.rejects(pusher.send('fcm', new RedisPusher.APNSMessage({ token: 'aa' })), /Cannot send a apns message via fcm/);
 		});
 
-		it('throws for a message of the wrong platform', () => {
-			const pusher = RedisPusher({ apns: APNS, gcm: GCM });
-			const message = new RedisPusher.APNSMessage({ token: 't' });
-			assert.throws(() => pusher.send('gcm', message), /Cannot send a apns message via gcm/);
-		});
-
-		it('throws on an invalid message and sends nothing', () => {
-			const pusher = RedisPusher({ gcm: GCM });
-			assert.throws(() => pusher.send('gcm', { data: {} }), /registrationId/);
-			assert.throws(() => pusher.send('gcm', 'not json'), SyntaxError);
-			assert.equal(sent.gcm.length, 0);
+		it('resolves (not rejects) when delivery fails', async () => {
+			apns.respond = () => ({ status: 400, body: { reason: 'BadDeviceToken' } });
+			const [ result ] = await createPusher().send('apns', { token: 'aa', alert: 'x' });
+			assert.deepEqual([ result.ok, result.error ], [ false, 'BadDeviceToken' ]);
 		});
 	});
 
-	describe('GCM events', () => {
-		beforeEach(() => sent.reset());
-		it('re-emits transmitted, transmissionError and registrationUpdated', () => {
-			const pusher = RedisPusher({ gcm: GCM });
-			const events = recorder(pusher, [ 'transmitted', 'transmissionError', 'registrationUpdated' ]);
-			pusher.send('gcm', { registrationId: [ 'r1', 'r2' ] });
-			const { sender } = sent.gcm[0];
+	describe('events', () => {
+		it('emits transmitted, transmissionError, unregistered and sent', async () => {
+			apns.respond = (r) => {
+				if (r.deviceToken === 'bb') return { status: 400, body: { reason: 'BadDeviceToken' } };
+				if (r.deviceToken === 'cc') return { status: 410, body: { reason: 'Unregistered' } };
+				return { status: 200 };
+			};
+			const pusher = createPusher();
+			const events = [];
+			for (const name of [ 'transmitted', 'transmissionError', 'unregistered' ])
+				pusher.on(name, (result) => events.push(name + ':' + result.recipient));
+			let sent;
+			pusher.on('sent', (message, results) => { sent = { message, results }; });
 
-			sender.emit('transmitted', { message_id: 'm1' }, 'r1');
-			sender.emit('transmissionError', 'NotRegistered', 'r2');
-			sender.emit('updated', { registration_id: 'r1-new' }, 'r1');
+			const results = await pusher.send('apns', { identifier: 'id', token: [ 'aa', 'bb', 'cc' ], alert: 'x' });
 
-			assert.deepEqual(events, [
-				[ 'transmitted', { platform: 'gcm', recipient: 'r1', result: { message_id: 'm1' } } ],
-				[ 'transmissionError', { platform: 'gcm', recipient: 'r2', error: 'NotRegistered' } ],
-				[ 'registrationUpdated', {
-					platform: 'gcm', recipient: 'r1', newRecipient: 'r1-new', result: { registration_id: 'r1-new' }
-				} ]
+			assert.deepEqual(events.sort(), [
+				'transmissionError:bb', 'transmissionError:cc', 'transmitted:aa', 'unregistered:cc'
 			]);
-		});
-
-		it('emits sender errors as `error` with a source', () => {
-			const pusher = RedisPusher({ gcm: GCM });
-			const events = recorder(pusher, [ 'error' ]);
-			pusher.send('gcm', { registrationId: 'r' });
-			sent.gcm[0].sender.emit('error', 401);
-
-			assert.equal(events.length, 1);
-			const err = events[0][1];
-			assert.ok(err instanceof Error);
-			assert.equal(err.source, 'gcm-sender');
-			assert.equal(err.message, '401');
-		});
-	});
-
-	describe('APNS events', () => {
-		beforeEach(() => sent.reset());
-		const device = { toString: () => 'abcdef' };
-
-		it('re-emits transmitted and transmissionError with the token as a string', () => {
-			const pusher = RedisPusher({ apns: APNS });
-			const events = recorder(pusher, [ 'transmitted', 'transmissionError' ]);
-			pusher.send('apns', { token: 'abcdef' });
-			const { sender } = sent.apns[0];
-			const notification = { alert: 'hi' };
-
-			sender.emit('transmitted', notification, device);
-			sender.emit('transmissionError', 8, notification, device);
-			sender.emit('transmissionError', 513, notification, undefined);
-
-			assert.deepEqual(events, [
-				[ 'transmitted', { platform: 'apns', recipient: 'abcdef', notification } ],
-				[ 'transmissionError', { platform: 'apns', recipient: 'abcdef', error: 8, notification } ],
-				[ 'transmissionError', { platform: 'apns', recipient: undefined, error: 513, notification } ]
-			]);
-		});
-
-		it('emits gateway and socket errors as `error`', () => {
-			const pusher = RedisPusher({ apns: APNS });
-			const events = recorder(pusher, [ 'error' ]);
-			pusher.send('apns', { token: 't' });
-			sent.apns[0].sender.emit('error', new Error('bad cert'));
-			sent.apns[0].sender.emit('socketError', new Error('ECONNRESET'));
-
-			assert.deepEqual(events.map(([ , err ]) => [ err.source, err.message ]), [
-				[ 'apns-gateway', 'bad cert' ],
-				[ 'apns-gateway', 'ECONNRESET' ]
-			]);
+			assert.equal(sent.message.identifier, 'id');
+			assert.strictEqual(sent.results, results);
 		});
 	});
 
 	describe('logger', () => {
-		beforeEach(() => sent.reset());
-		it('is silent by default and uses the given logger otherwise', () => {
+		it('is silent by default and uses the given logger otherwise', async () => {
 			const lines = [];
 			const logger = { log: (...a) => lines.push(a), warn: (...a) => lines.push(a), error: (...a) => lines.push(a) };
-			RedisPusher({ gcm: GCM }).send('gcm', { registrationId: 'r' });
+			await createPusher().send('fcm', { token: 't' });
 			assert.equal(lines.length, 0);
 
-			RedisPusher({ gcm: GCM, logger }).send('gcm', { registrationId: 'r' });
+			await createPusher({ logger }).send('fcm', { token: 't' });
 			assert.ok(lines.some(([ format ]) => format.includes('Sending notification')), JSON.stringify(lines));
+			assert.ok(lines.some(([ format ]) => format.includes('Transmitted')), JSON.stringify(lines));
 		});
 	});
 
 	describe('start() / stop()', () => {
-		beforeEach(() => sent.reset());
 		it('fails to start without channels', (t, done) => {
-			RedisPusher({ gcm: GCM }).start((err) => {
+			createPusher().start((err) => {
 				assert.match(err.message, /No channels configured/);
 				done();
 			});
@@ -192,5 +146,38 @@ describe('Pusher', () => {
 				done();
 			});
 		});
+
+		it('stop() closes the APNS/FCM connections; send() still works afterwards', async () => {
+			const pusher = createPusher();
+			await pusher.send('apns', { token: 'aa', alert: 'x' });
+			const session = pusher._transports.apns.client.session;
+			assert.ok(session && !session.closed);
+			await new Promise((resolve) => pusher.stop(resolve));
+			assert.ok(session.closed);
+			assert.equal((await pusher.send('apns', { token: 'aa', alert: 'y' }))[0].ok, true);
+		});
+	});
+
+	it('does not keep the process alive once sends complete', async () => {
+		// A script that sends without calling stop() must exit on its own.
+		const script = `
+			const RedisPusher = require(${JSON.stringify(path.join(__dirname, '..'))});
+			const pusher = RedisPusher(${JSON.stringify({
+				apns: apnsOptions(credentials, apns),
+				fcm: fcmOptions(credentials, fcm)
+			})});
+			Promise.all([
+				pusher.send('apns', { token: 'aa', alert: 'x' }),
+				pusher.send('fcm', { token: 't' })
+			]).then((results) => console.log(JSON.stringify(results.map((r) => r[0].ok))));
+		`;
+		const child = spawn(process.execPath, [ '-e', script ], { stdio: [ 'ignore', 'pipe', 'inherit' ] });
+		let output = '';
+		child.stdout.on('data', (chunk) => { output += chunk; });
+		const timer = setTimeout(() => child.kill(), 5000);
+		const code = await new Promise((resolve) => child.on('exit', resolve));
+		clearTimeout(timer);
+		assert.equal(code, 0, 'exited by itself');
+		assert.equal(output.trim(), '[true,true]');
 	});
 });

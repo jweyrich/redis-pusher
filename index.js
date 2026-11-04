@@ -1,13 +1,20 @@
-var Pusher = require('./lib/pusher')
-	, messages = require('./lib/messages')
-	, options = require('./lib/options');
+'use strict';
 
-module.exports = Pusher;
-module.exports.Pusher = Pusher;
-module.exports.createPusher = function (opts) {
+const Pusher = require('./lib/pusher');
+const messages = require('./lib/messages');
+const options = require('./lib/options');
+
+// Callable with or without `new`.
+function RedisPusher(opts) {
 	return new Pusher(opts);
-};
-module.exports.APNSMessage = messages.APNSMessage;
-module.exports.GCMMessage = messages.GCMMessage;
-module.exports.createMessage = messages.create;
-module.exports.defaults = options.DEFAULTS;
+}
+
+RedisPusher.Pusher = Pusher;
+RedisPusher.createPusher = RedisPusher;
+RedisPusher.APNSMessage = messages.APNSMessage;
+RedisPusher.FCMMessage = messages.FCMMessage;
+RedisPusher.GCMMessage = messages.FCMMessage; // Deprecated alias.
+RedisPusher.createMessage = messages.create;
+RedisPusher.defaults = options.DEFAULTS;
+
+module.exports = RedisPusher;

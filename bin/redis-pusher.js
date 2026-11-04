@@ -49,11 +49,9 @@ function main() {
 	// can reconnect.
 	pusher.on('error', function () {});
 
-	pusher.on('feedback', function (devices) {
-		devices.forEach(function (device) {
-			// This is where you would mark the device as bad in your database.
-			console.log("[apns-feedback] Should remove device: '%s'", device.token);
-		});
+	pusher.on('unregistered', function (result) {
+		// This is where you would mark the device as bad in your database.
+		console.log("[%s] Should remove device: '%s' (%s)", result.platform, result.recipient, result.error);
 	});
 
 	if (config.catchExceptions) {

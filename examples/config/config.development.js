@@ -9,22 +9,23 @@ var config = module.exports = require('./config.global');
 //
 config.redis.channels = {
 	'development:push:ios': 'apns',
-	'development:push:android': 'gcm'
+	'development:push:android': 'fcm'
 };
 
 //
-// APNS
+// APNS (token-based auth with a .p8 key from your Apple developer account)
 //
 config.apns = {
-	certificate: 'private/aps_development.p12', // Path or Buffer.
-	passphrase: '<CHANGEME>',
-	gateway: { address: 'gateway.sandbox.push.apple.com' },
-	feedback: { address: 'feedback.sandbox.push.apple.com' }
+	key: 'private/AuthKey_<KEY_ID>.p8', // Path or PEM contents.
+	keyId: '<CHANGEME>',
+	teamId: '<CHANGEME>',
+	topic: 'com.example.app',           // Your app's bundle ID.
+	production: false                   // Use the sandbox.
 };
 
 //
-// GCM
+// FCM (service account key from Firebase console > Project settings > Service accounts)
 //
-config.gcm = {
-	options: { key: '<CHANGEME>' } // API key
+config.fcm = {
+	serviceAccount: 'private/firebase-service-account.json' // Path or parsed JSON.
 };

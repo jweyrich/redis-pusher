@@ -1,178 +1,244 @@
 # redis-pusher
 
 A Node.js library (and CLI) that consumes messages published on Redis channels
-and sends them as Push Notifications via APNS or GCM.
+and sends them as push notifications via Apple Push Notification service (APNS)
+and Firebase Cloud Messaging (FCM).
 
 - **Events**: listens for messages published on the configured Redis channel(s).
-- **Processing**: converts each message to the APNS or GCM format and dispatches it.
-- **Feedback**: periodically polls the APNS Feedback service and tells you which
-  devices have persistent delivery failures, so you can stop pushing to them.
+- **Delivery**: sends each message through APNS's HTTP/2 API or the FCM HTTP v1
+  API, retrying transient failures.
+- **Dead devices**: tells you when Apple or Google report that a device token is
+  no longer valid, so you can stop pushing to it.
+
+It has no APNS/FCM SDK dependencies: both protocols are implemented on Node's
+built-in `http2` and `crypto` modules.
 
 ## Install
 
-Requires Node.js 16 or later.
+Requires Node.js 22 or later.
 
 	$ npm install redis-pusher
+
+## Credentials
+
+**APNS.** Token-based auth is recommended. In your Apple developer account, create
+a key with the "Apple Push Notifications service (APNs)" capability and download
+the `.p8` file. Note its Key ID and your Team ID. Certificate-based auth with a
+`.p12` file is also supported.
+
+**FCM.** In the Firebase console, go to Project settings > Service accounts and
+generate a new private key. That downloads the service account JSON file.
 
 ## Usage as a library
 
 ```js
-var RedisPusher = require('redis-pusher');
+const RedisPusher = require('redis-pusher');
 
-var pusher = RedisPusher.createPusher({
+const pusher = RedisPusher({
 	logger: console, // Optional. Silent by default.
 	redis: {
 		host: '127.0.0.1',
 		port: 6379,
 		channels: {
 			'push:ios': 'apns',
-			'push:android': 'gcm'
+			'push:android': 'fcm'
 		}
 	},
 	apns: {
-		certificate: '/path/to/apns_production.p12', // Path or Buffer.
-		passphrase: 'secret'
+		key: '/path/to/AuthKey_ABC123DEFG.p8',
+		keyId: 'ABC123DEFG',
+		teamId: 'DEF123GHIJ',
+		topic: 'com.example.app', // Your app's bundle ID.
+		production: true          // false for the sandbox (development builds).
 	},
-	gcm: {
-		options: { key: 'YOUR_GCM_API_KEY' }
+	fcm: {
+		serviceAccount: '/path/to/service-account.json'
 	}
 });
 
-pusher.on('error', function (err) {
-	// Connection/protocol errors. `err.source` is one of 'redis-client',
-	// 'redis-subscriber', 'redis-lock', 'apns-gateway', 'apns-feedback',
-	// 'gcm-sender', 'apns' or 'gcm'.
+pusher.on('error', (err) => {
+	// Connection/credential errors. `err.source` is one of 'redis-client',
+	// 'redis-subscriber', 'redis-lock', 'apns', 'fcm' or 'fcm-auth'.
 	console.error(err.source, err);
 });
 
-pusher.on('feedback', function (devices) {
-	// APNS says these devices are no longer reachable.
-	devices.forEach(function (device) {
-		db.markDeviceAsBad(device.token, device.time);
-	});
+pusher.on('unregistered', (result) => {
+	// Apple or Google say this device token is no longer valid.
+	db.removeDeviceToken(result.platform, result.recipient);
 });
 
-pusher.on('registrationUpdated', function (info) {
-	// GCM says this registration ID has a new canonical ID.
-	db.replaceRegistrationId(info.recipient, info.newRecipient);
+pusher.on('transmissionError', (result) => {
+	// result: { platform, recipient, ok: false, status, error, ... }
+	console.warn('Push failed', result.platform, result.recipient, result.error);
 });
 
-pusher.on('transmissionError', function (info) {
-	// info: { platform, recipient, error, notification|result }
-	if (info.platform === 'gcm' && info.error === 'NotRegistered')
-		db.removeRegistrationId(info.recipient);
-});
-
-pusher.start(function (err) {
+pusher.start((err) => {
 	if (err) throw err;
 	console.log('Listening for push messages');
 });
 
 // Later:
-pusher.stop(function () { console.log('Stopped'); });
+pusher.stop(() => console.log('Stopped'));
 ```
 
 Then publish messages from anywhere:
 
 	redis> publish push:ios '{ "identifier": "msg-1", "token": "<device_token>", "alert": "Hello!" }'
+	redis> publish push:android '{ "identifier": "msg-2", "token": "<registration_token>", "notification": { "title": "Hello!" } }'
 
 ### Sending without Redis
 
 `send()` delivers a notification immediately. It doesn't need `start()`, a
-Redis connection or a lock:
+Redis connection or a lock. It returns a Promise of one result per recipient:
 
 ```js
-var pusher = RedisPusher.createPusher({ gcm: { options: { key: 'KEY' } } });
+const pusher = RedisPusher({ fcm: { serviceAccount: '/path/to/service-account.json' } });
 
-pusher.send('gcm', { registrationId: [ 'id1', 'id2' ], data: { foo: 'bar' } });
+const results = await pusher.send('fcm', {
+	token: [ 'token1', 'token2' ],
+	notification: { title: 'Hello', body: 'World' },
+	data: { orderId: '123' }
+});
+// [ { platform: 'fcm', recipient: 'token1', ok: true, id: 'projects/.../messages/...' },
+//   { platform: 'fcm', recipient: 'token2', ok: false, status: 404, error: 'UNREGISTERED', unregistered: true, ... } ]
 ```
 
-`send()` throws if the message is invalid or the platform isn't configured.
-Delivery results arrive through the `transmitted` / `transmissionError` events.
+Or with a callback: `pusher.send('fcm', message, (err, results) => { ... })`.
+
+A failed delivery is a result with `ok: false`, not a rejection. The Promise only
+rejects (or the callback gets `err`) when the message is invalid or the platform
+isn't configured.
+
+A script that only calls `send()` exits once its pushes complete. You don't need
+to call `stop()`.
 
 ### API
 
-#### `new RedisPusher(options)` / `RedisPusher.createPusher(options)`
+#### `RedisPusher(options)` / `new RedisPusher(options)` / `RedisPusher.createPusher(options)`
 
-Creates a pusher. It doesn't connect until you call `start()`. Throws if the
-options are inconsistent (for example, a channel mapped to a platform that
-isn't configured).
+Creates a pusher. Reads and checks the credentials immediately, and throws if
+they are missing or invalid, or if the options are inconsistent (for example, a
+channel mapped to a platform that isn't configured). It doesn't connect to
+anything until it's used.
 
 #### `pusher.start([callback])`
 
-Connects to Redis, subscribes to `redis.channels`, and starts polling the APNS
-Feedback service. Calls `callback(err)` once subscribed.
+Connects to Redis and subscribes to `redis.channels`. Calls `callback(err)` once
+subscribed.
 
 #### `pusher.stop([callback])`
 
-Unsubscribes, closes the Redis and APNS connections, and stops the feedback
-polling. Calls `callback(err)` once the Redis connections are closed.
+Unsubscribes and closes the Redis, APNS and FCM connections, letting in-flight
+pushes finish. Calls `callback(err)` once everything is closed. `send()` still
+works after `stop()`, and opens new connections.
 
-#### `pusher.send(platform, message)`
+#### `pusher.send(platform, message[, callback])`
 
-Sends `message` (a JSON string, a plain object or an `APNSMessage`/`GCMMessage`)
-via `platform` (`'apns'` or `'gcm'`). Returns the validated message.
+Sends `message` (a JSON string, a plain object, or an `APNSMessage`/`FCMMessage`)
+via `platform` (`'apns'` or `'fcm'`). See "Sending without Redis".
+
+#### Results
+
+Each recipient gets one result:
+
+| Field          | Meaning                                                                                 |
+|----------------|-----------------------------------------------------------------------------------------|
+| `platform`     | `'apns'` or `'fcm'`.                                                                    |
+| `recipient`    | The device token.                                                                       |
+| `ok`           | `true` if Apple/Google accepted the notification.                                       |
+| `id`           | The `apns-id`, or the FCM message name.                                                 |
+| `status`       | The HTTP status, when the failure came from the server.                                 |
+| `error`        | The APNS `reason` (e.g. `BadDeviceToken`), the FCM error code (e.g. `UNREGISTERED`), or a network error code (e.g. `ECONNREFUSED`). |
+| `unregistered` | `true` when the token is no longer valid (APNS 410, FCM `UNREGISTERED`).                |
+| `time`         | APNS only: when Apple last knew the token was valid.                                    |
+| `message`      | FCM only: the server's error description.                                               |
+
+Rate limits (429), server errors (5xx), expired auth tokens and network errors
+are retried with exponential backoff (see the `retries` and `retryDelay`
+options) before a failure is reported.
 
 #### Events
 
-| Event                 | Arguments                 | When                                                       |
-|-----------------------|---------------------------|------------------------------------------------------------|
-| `ready`               | –                         | Subscribed to all configured channels.                     |
-| `message`             | `(message, channel)`      | A valid message was received from Redis.                   |
-| `invalid`             | `(error, channel, raw)`   | A message from Redis was rejected (bad JSON, missing fields). |
-| `sent`                | `(message)`               | A message was handed to the APNS/GCM sender.               |
-| `transmitted`         | `(info)`                  | Delivered to a device: `{ platform, recipient, notification\|result }`. |
-| `transmissionError`   | `(info)`                  | Rejected for a device: `{ platform, recipient, error, notification\|result }`. |
-| `registrationUpdated` | `(info)`                  | GCM canonical ID: `{ platform, recipient, newRecipient, result }`. |
-| `feedback`            | `(devices)`               | APNS feedback: `[ { token, time } ]`, `time` is a `Date`.  |
-| `error`               | `(error)`                 | Connection/protocol errors; see `error.source`.            |
+| Event               | Arguments               | When                                                          |
+|---------------------|-------------------------|---------------------------------------------------------------|
+| `ready`             | –                       | Subscribed to all configured channels.                        |
+| `message`           | `(message, channel)`    | A valid message was received from Redis.                      |
+| `invalid`           | `(error, channel, raw)` | A message from Redis was rejected (bad JSON, missing fields). |
+| `sent`              | `(message, results)`    | Delivery was attempted for every recipient of a message.      |
+| `transmitted`       | `(result)`              | Accepted for a device.                                        |
+| `transmissionError` | `(result)`              | Failed for a device, after retries.                           |
+| `unregistered`      | `(result)`              | The device token is no longer valid, so stop sending to it. Also emitted as `transmissionError`. |
+| `error`             | `(error)`               | Connection/credential errors. See `error.source`.             |
 
 As with any Node.js `EventEmitter`, an `error` event with no listener throws.
 **Always listen for `error`.**
 
 #### Other exports
 
-- `RedisPusher.APNSMessage`, `RedisPusher.GCMMessage`: the message classes.
+- `RedisPusher.APNSMessage`, `RedisPusher.FCMMessage`: the message classes.
 - `RedisPusher.createMessage(platform, data)`: builds and validates a message, or throws.
 - `RedisPusher.defaults`: the default options (read-only).
 
 ### Options
 
-Anything you don't set falls back to these defaults:
+Anything you don't set falls back to its default.
 
-	logger                         -- Object with console-like log/warn/error. Default: silent.
+#### General
 
-	redis.host                     -- Default: '127.0.0.1'.
-	redis.port                     -- Default: 6379.
-	redis.pass                     -- Password, or '' if none. Default: ''.
-	redis.options                  -- Passed to redis.createClient(). Default: {}.
-	redis.channels                 -- Channels to subscribe to. Either an object mapping each channel to
-	                                  its platform, e.g. { 'push:ios': 'apns', 'push:android': 'gcm' },
-	                                  or an array of names, in which case the platform is guessed from
-	                                  the name: 'apns', 'ios', 'iphone' or 'ipad' => apns;
-	                                  'gcm' or 'android' => gcm.
-	redis.failoverEnabled          -- See "Failover redundancy". Default: false.
-	redis.lock.keyPrefix           -- Default: 'push_lock_'.
-	redis.lock.lockTimeout         -- Milliseconds. Default: 5000.
-	redis.lock.maxAttempts         -- Default: 5.
+| Option   | Default | Description                                         |
+|----------|---------|-----------------------------------------------------|
+| `logger` | silent  | Any object with console-like `log`, `warn` and `error` methods, e.g. `console`. |
 
-	apns                           -- Set to false to disable APNS. APNS is also disabled when no
-	                                  certificate is given.
-	apns.certificate               -- Path to a .p12 (PKCS #12) file, or its contents as a Buffer.
-	apns.passphrase                -- The certificate's passphrase, if any.
-	apns.gateway.address           -- Default: 'gateway.push.apple.com'.
-	                                  Use 'gateway.sandbox.push.apple.com' for development.
-	apns.gateway.connectionTimeout -- Milliseconds. Default: 240000. Any other `apns.gateway` key is
-	                                  passed to apn.Connection.
-	apns.feedback.enabled          -- Default: true.
-	apns.feedback.address          -- Default: 'feedback.push.apple.com'.
-	                                  Use 'feedback.sandbox.push.apple.com' for development.
-	apns.feedback.interval         -- Polling interval in seconds. Default: 300.
+#### Redis
 
-	gcm                            -- Set to false to disable GCM. GCM is also disabled when no key
-	                                  is given.
-	gcm.options.key                -- Your GCM API key.
-	gcm.options.retries            -- Default: 3.
+| Option                  | Default        | Description |
+|-------------------------|----------------|-------------|
+| `redis.host`            | `'127.0.0.1'`  | |
+| `redis.port`            | `6379`         | |
+| `redis.pass`            | `''`           | Password, or `''` if none. |
+| `redis.options`         | `{}`           | Passed to `redis.createClient()`. |
+| `redis.channels`        | `[]`           | Channels to subscribe to. Either an object mapping each channel to its platform, e.g. `{ 'push:ios': 'apns', 'push:android': 'fcm' }`, or an array of names, in which case the platform is guessed from the name: `apns`, `ios`, `iphone` or `ipad` → APNS, and `fcm`, `gcm` or `android` → FCM. |
+| `redis.failoverEnabled` | `false`        | See "Failover redundancy". |
+| `redis.lock.keyPrefix`  | `'push_lock_'` | |
+| `redis.lock.lockTimeout`| `5000`         | Milliseconds. |
+| `redis.lock.maxAttempts`| `5`            | |
+
+#### APNS
+
+Set `apns` to `false` to disable APNS. It's also disabled when neither a key nor
+a certificate is given. Use either `key` + `keyId` + `teamId` (token-based auth)
+or `certificate` (certificate-based auth).
+
+| Option                | Default | Description |
+|-----------------------|---------|-------------|
+| `apns.key`            | –       | Token-based auth: path to the `.p8` key, or its PEM contents. |
+| `apns.keyId`          | –       | Required with `apns.key`. |
+| `apns.teamId`         | –       | Required with `apns.key`. |
+| `apns.certificate`    | –       | Certificate-based auth: path to a `.p12` file, or its contents as a Buffer. |
+| `apns.passphrase`     | –       | The certificate's passphrase, if any. |
+| `apns.topic`          | –       | Your app's bundle ID. Required with `apns.key`. A message's own `topic` overrides it. |
+| `apns.production`     | `true`  | `true` uses `api.push.apple.com`. `false` uses `api.sandbox.push.apple.com`. |
+| `apns.port`           | `443`   | `443` or `2197`. |
+| `apns.url`            | –       | Overrides the server URL entirely (e.g. for testing). |
+| `apns.concurrency`    | `100`   | Max concurrent requests. |
+| `apns.requestTimeout` | `10000` | Milliseconds. |
+| `apns.retries`        | `3`     | Retries for rate limits, server errors and network errors. |
+| `apns.retryDelay`     | `500`   | Initial backoff in milliseconds, doubled on each retry. |
+
+#### FCM
+
+Set `fcm` to `false` to disable FCM. It's also disabled when no service account
+is given.
+
+| Option               | Default                        | Description |
+|----------------------|--------------------------------|-------------|
+| `fcm.serviceAccount` | –                              | Path to the service account JSON key file, or its parsed contents. |
+| `fcm.projectId`      | the service account's `project_id` | |
+| `fcm.url`            | `'https://fcm.googleapis.com'` | Overrides the server URL (e.g. for testing). |
+| `fcm.concurrency`    | `100`                          | Max concurrent requests. |
+| `fcm.requestTimeout` | `10000`                        | Milliseconds. |
+| `fcm.retries`        | `3`                            | Retries for rate limits, server errors and network errors. |
+| `fcm.retryDelay`     | `500`                          | Initial backoff in milliseconds, doubled on each retry. |
 
 ### Sharding
 
@@ -183,15 +249,17 @@ different `redis.channels`.
 
 Multiple instances can subscribe to the same channel(s) at the same time. A
 Redis lock keyed on the message `identifier` makes sure only one of them sends
-each message. All instances sharing the same channel(s) must use the same
-`redis.lock.keyPrefix` and set `redis.failoverEnabled` to `true`.
+each message. The lock is held until delivery has been attempted, so if the
+instance holding it dies, a standby instance takes over. All instances sharing
+the same channel(s) must use the same `redis.lock.keyPrefix` and set
+`redis.failoverEnabled` to `true`.
 
 ### What redis-pusher does not attempt to do
 
-It doesn't decide what to do with APNS feedback or GCM "not registered" replies.
-That depends on your setup (an SQL table of devices, for example). It emits the
-`feedback`, `transmissionError` and `registrationUpdated` events, and you decide
-what to do with them.
+It doesn't store device tokens or decide what to do with dead ones. That
+depends on your setup (an SQL table of devices, for example). It emits the
+`unregistered` and `transmissionError` events, and you decide what to do with
+them.
 
 ## Usage as a standalone service (CLI)
 
@@ -208,58 +276,73 @@ defaults to `development`):
 	$ $EDITOR private/config.development.js
 	$ NODE_ENV=development redis-pusher
 
-The CLI logs to the console and prints the devices reported by the APNS
-feedback service. Stop it with Ctrl-C or SIGTERM.
-
-## Running the tests
-
-	$ npm install
-	$ npm test
-
-The tests use Node's built-in test runner (Node 18+) and never contact the
-APNS/GCM servers. The integration tests start a throwaway `redis-server` on a
-free port, and are skipped if `redis-server` isn't installed. To use an existing
-server instead, set `REDIS_PORT` (the tests flush its current database).
+The CLI logs to the console and prints the devices reported as unregistered.
+Stop it with Ctrl-C or SIGTERM.
 
 ## Message format for iOS (APNS)
 
 	message {
 		identifier: [string]               -- Unique identifier. Required for messages published via Redis
 		                                      (it's the lock key).
-		token: [string or array of string] -- Required. The APNS device token of a recipient device, or
-		                                      an array of them.
-		expiry: [number]                   -- Seconds from now.
+		token: [string or array of string] -- Required. The hex device token(s).
+		alert: [string or object]          -- e.g. "Hello" or { "title": "...", "body": "..." }
 		badge: [number]
-		sound: [string]
-		alert: [string]
-		payload: [object]
-		retryLimit: [number]               -- Optional. The maximum number of retries if an error occurs
-		                                      when sending a notification. A value of 0 will attempt
-		                                      sending only once (0 retries).
+		sound: [string or object]
+		category: [string]
+		threadId: [string]
+		contentAvailable: [boolean]        -- A background (silent) push when there's no alert/badge/sound.
+		mutableContent: [boolean]
+		payload: [object]                  -- Custom keys, sent next to `aps`.
+		aps: [object]                      -- Extra `aps` keys, e.g. { "interruption-level": "time-sensitive" }.
+		expiry: [number]                   -- Seconds from now. 0 means "deliver once, don't store".
+		priority: [10, 5 or 1]             -- Default: 10, or 5 for background pushes.
+		pushType: [string]                 -- Default: 'background' for silent pushes, else 'alert'.
+		topic: [string]                    -- Overrides `apns.topic`.
+		collapseId: [string]
 	}
 
-## Message format for Android (GCM)
+The JSON payload is limited to 4 KB.
+
+## Message format for Android (FCM)
 
 	message {
-		identifier: [string]                        -- Unique identifier. Required for messages published
-		                                               via Redis (it's the lock key).
-		registrationId: [string or array of string] -- Required. The GCM registration ID of a recipient
-		                                               device, or an array of them (up to 1000). Sending
-		                                               to several registration IDs is called a multicast
-		                                               message.
-		collapseKey: [string]                       -- Optional. If there's an older message with the
-		                                               same collapseKey and registration ID, the older
-		                                               message is discarded and the new one takes its
-		                                               place.
-		delayWhileIdle: [boolean]                   -- Optional. Default is false. If the device is
-		                                               connected but idle, the message is delivered
-		                                               right away unless delayWhileIdle is true. If it
-		                                               is true, the message is stored on the GCM servers
-		                                               until the device wakes up.
-		timeToLive: [number:0..2419200]             -- Optional. How long (in seconds) the message should
-		                                               be kept on GCM storage if the device is offline.
-		                                               Requests without this field default to the
-		                                               maximum of 4 weeks. When a message times out,
-		                                               it's discarded from GCM storage.
-		data: [object]                              -- Optional. Custom data.
+		identifier: [string]               -- Unique identifier. Required for messages published via Redis
+		                                      (it's the lock key).
+		token: [string or array of string] -- Required. The FCM registration token(s). `registrationId`
+		                                      is accepted too.
+		notification: [object]             -- { "title": "...", "body": "...", "image": "..." }
+		data: [object]                     -- Custom data. FCM only accepts string values, so other
+		                                      values are sent JSON-encoded.
+		collapseKey: [string]              -- Newer messages replace older ones with the same key.
+		timeToLive: [number:0..2419200]    -- Seconds to keep the message if the device is offline.
+		priority: ['high' or 'normal']
+		android: [object]                  -- These four are passed through to the FCM v1 message as-is,
+		apns: [object]                        see https://firebase.google.com/docs/reference/fcm/rest/v1/projects.messages
+		webpush: [object]
+		fcmOptions: [object]
 	}
+
+## Migrating from 0.2
+
+- **GCM is gone.** Google shut it down, so legacy server keys no longer work.
+  Replace `gcm: { options: { key } }` with `fcm: { serviceAccount }`. The `'gcm'`
+  platform name and the GCM message fields (`registrationId`, `collapseKey`,
+  `timeToLive`, `data`) still work. `delayWhileIdle` is ignored.
+- **APNS uses the HTTP/2 API.** A `.p12` certificate still works. Add `topic`,
+  and set `production: false` for the sandbox (a legacy sandbox
+  `gateway.address` is still recognised). Device tokens must be hex strings.
+- **The `feedback` and `registrationUpdated` events are gone.** Apple retired the
+  feedback service, and FCM v1 has no canonical IDs. Listen for `unregistered`.
+- **`send()` returns a Promise of results** instead of the message.
+- **Node.js 22 or later is required.**
+
+## Running the tests
+
+	$ npm install
+	$ npm test
+
+The tests never contact Apple or Google. They run against local mock APNS and FCM
+servers that check JWT signatures, request paths and headers the way the real
+services do. The integration tests also start a throwaway `redis-server` on a
+free port, and are skipped if `redis-server` isn't installed. To use an existing
+server instead, set `REDIS_PORT` (the tests flush its current database).
