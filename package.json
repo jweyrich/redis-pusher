@@ -2,7 +2,17 @@
 	"name": "redis-pusher",
 	"version": "0.3.0",
 	"description": "A Node.js library (and CLI) that consumes messages published on Redis channels and sends them as Push Notifications via APNS or GCM.",
-	"keywords": [ "redis", "sharding", "apple", "push", "notification", "iOS", "apns", "android", "gcm" ],
+	"keywords": [
+		"redis",
+		"sharding",
+		"apple",
+		"push",
+		"notification",
+		"iOS",
+		"apns",
+		"android",
+		"gcm"
+	],
 	"author": "Jardel Weyrich <jweyrich@gmail.com>",
 	"main": "index.js",
 	"bin": {
@@ -17,6 +27,9 @@
 	"repository": {
 		"type": "git",
 		"url": "git@github.com:jweyrich/redis-pusher.git"
+	},
+	"scripts": {
+		"test": "node --test --test-timeout=15000 test/*.test.js"
 	},
 	"dependencies": {
 		"push-notify": "~0.3.0",

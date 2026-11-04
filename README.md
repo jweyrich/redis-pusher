@@ -209,6 +209,16 @@ defaults to `development`):
 The CLI logs to the console and prints the devices reported by the APNS
 feedback service. Stop it with Ctrl-C or SIGTERM.
 
+## Running the tests
+
+	$ npm install
+	$ npm test
+
+The tests use Node's built-in test runner (Node 18+) and never contact the
+APNS/GCM servers. The integration tests start a throwaway `redis-server` on a
+free port, and are skipped if `redis-server` isn't installed. To use an existing
+server instead, set `REDIS_PORT` (the tests flush its current database).
+
 ## Message format for iOS (APNS)
 
 	message {
