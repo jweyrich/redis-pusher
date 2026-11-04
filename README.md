@@ -1,130 +1,222 @@
 # redis-pusher
 
-A Node.js application that consumes messages published on Redis channels and
-send them as Push Notifications via APNS or GCM.
+A Node.js library (and CLI) that consumes messages published on Redis channels
+and sends them as Push Notifications via APNS or GCM.
 
-1. Workflow
+- **Events**: listens for messages published on the configured Redis channel(s).
+- **Processing**: converts each message to the APNS or GCM format and dispatches it.
+- **Feedback**: periodically polls the APNS Feedback service and tells you which
+  devices have persistent delivery failures, so you can stop pushing to them.
 
-	a) Events: Sit and listen for messages published on the Redis subscribed
-	   channel(s).
+## Install
 
-	b) Processing: Convert each published message to the APNS or GCM message format
-	   and dispatch them to the APNS or GCM server.
+	$ npm install redis-pusher
 
-	c) Feedback: Periodically connect to the APNS Feedback server, and receive a
-	   list of devices that have persistent delivery failures so that you can
-	   mark them as bad and refrain from sending new push notifications to them.
+## Usage as a library
 
-2. Sharding
+```js
+var RedisPusher = require('redis-pusher');
 
-	You can split the workload across multiple `redis-pusher` instances.
-	To do that, configure `config.redis.channels` in your configuration file so
-	that each `redis-pusher` instance subscribes to different channel(s).
+var pusher = RedisPusher.createPusher({
+	logger: console, // Optional. Silent by default.
+	redis: {
+		host: '127.0.0.1',
+		port: 6379,
+		channels: {
+			'push:ios': 'apns',
+			'push:android': 'gcm'
+		}
+	},
+	apns: {
+		certificate: '/path/to/apns_production.p12', // Path or Buffer.
+		passphrase: 'secret'
+	},
+	gcm: {
+		options: { key: 'YOUR_GCM_API_KEY' }
+	}
+});
 
-3. Failover redundancy
+pusher.on('error', function (err) {
+	// Connection/protocol errors. `err.source` is one of 'redis-client',
+	// 'redis-subscriber', 'redis-lock', 'apns-gateway', 'apns-feedback',
+	// 'gcm-sender', 'apns' or 'gcm'.
+	console.error(err.source, err);
+});
 
-	You may have multipe instances subscribed to the same channel(s)
-	simultaneously. To do that, all your instances sharing the same channel(s)
-	must specify the same value for `config.redis.lock.keyPrefix` and set
-	`config.redis.failoverEnabled` to `true`.
+pusher.on('feedback', function (devices) {
+	// APNS says these devices are no longer reachable.
+	devices.forEach(function (device) {
+		db.markDeviceAsBad(device.token, device.time);
+	});
+});
 
-4. Configuration
+pusher.on('registrationUpdated', function (info) {
+	// GCM says this registration ID has a new canonical ID.
+	db.replaceRegistrationId(info.recipient, info.newRecipient);
+});
 
-	Each configuration file may be considered an environment (e.g.: development,
-	production, etc). A new configuration file can extend an existing
-	configuration by adding these lines before anything else:
+pusher.on('transmissionError', function (info) {
+	// info: { platform, recipient, error, notification|result }
+	if (info.platform === 'gcm' && info.error === 'NotRegistered')
+		db.removeRegistrationId(info.recipient);
+});
 
-		var config = module.exports = require('./another_existing_file')
-		var this_config_name = 'example';
-		config.loaded.push(this_config_name);
+pusher.start(function (err) {
+	if (err) throw err;
+	console.log('Listening for push messages');
+});
 
-	To switch between environments (configurations), specify
-	`NODE_ENV=<env_name>` when running `redis-pusher`. Example:
+// Later:
+pusher.stop(function () { console.log('Stopped'); });
+```
 
-		NODE_ENV=production node .
+Then publish messages from anywhere:
 
-	The example above will load `./private/config.production.js`.
+	redis> publish push:ios '{ "identifier": "msg-1", "token": "<device_token>", "alert": "Hello!" }'
 
-5. What `redis-pusher` does not attempt to do
+### Sending without Redis
 
-	It does not process any of the APNS feedback messages. It also does not handle
-	GCM replies that tell you the device is not (or no longer) registered.
-	This is something specific to your scenario. For example, your scenario might
-	involve an SQL table containing all registered devices (id, device_token, etc),
-	so you could mark them as bad, or simply delete them. It's entirely up to you!
+`send()` delivers a notification immediately. It doesn't need `start()`, a
+Redis connection or a lock:
 
-- - -
+```js
+var pusher = RedisPusher.createPusher({ gcm: { options: { key: 'KEY' } } });
 
-### How can I test it?
+pusher.send('gcm', { registrationId: [ 'id1', 'id2' ], data: { foo: 'bar' } });
+```
 
-##### Install the required tools
+`send()` throws if the message is invalid or the platform isn't configured.
+Delivery results arrive through the `transmitted` / `transmissionError` events.
 
-1. [Node.js](http://nodejs.org/)
-2. [Redis](http://redis.io/)
+### API
 
-##### Clone the repository
+#### `new RedisPusher(options)` / `RedisPusher.createPusher(options)`
 
-	$ git clone https://github.com/jweyrich/redis-pusher.git
+Creates a pusher. It doesn't connect until you call `start()`. Throws if the
+options are inconsistent (for example, a channel mapped to a platform that
+isn't configured).
 
-##### Install the dependencies
+#### `pusher.start([callback])`
 
-	$ cd redis-pusher
-	$ npm install
+Connects to Redis, subscribes to `redis.channels`, and starts polling the APNS
+Feedback service. Calls `callback(err)` once subscribed.
 
-##### Test locally
+#### `pusher.stop([callback])`
 
-###### Configure
+Unsubscribes, closes the Redis and APNS connections, and stops the feedback
+polling. Calls `callback(err)` once the Redis connections are closed.
 
-a) Copy your APNS certificates and keys to the private
-   directory that resides within the project's directory:
+#### `pusher.send(platform, message)`
 
-	$ cp -i /path/to/your/apns_development.p12 \
-		/path/to/your/apns_production.p12 \
-		private/
+Sends `message` (a JSON string, a plain object or an `APNSMessage`/`GCMMessage`)
+via `platform` (`'apns'` or `'gcm'`). Returns the validated message.
 
-b) Copy the example configuration files to the project's `private`
-   directory:
+#### Events
 
-	$ cp -ir examples/config/* private/
+| Event                 | Arguments                 | When                                                       |
+|-----------------------|---------------------------|------------------------------------------------------------|
+| `ready`               | –                         | Subscribed to all configured channels.                     |
+| `message`             | `(message, channel)`      | A valid message was received from Redis.                   |
+| `invalid`             | `(error, channel, raw)`   | A message from Redis was rejected (bad JSON, missing fields). |
+| `sent`                | `(message)`               | A message was handed to the APNS/GCM sender.               |
+| `transmitted`         | `(info)`                  | Delivered to a device: `{ platform, recipient, notification\|result }`. |
+| `transmissionError`   | `(info)`                  | Rejected for a device: `{ platform, recipient, error, notification\|result }`. |
+| `registrationUpdated` | `(info)`                  | GCM canonical ID: `{ platform, recipient, newRecipient, result }`. |
+| `feedback`            | `(devices)`               | APNS feedback: `[ { token, time } ]`, `time` is a `Date`.  |
+| `error`               | `(error)`                 | Connection/protocol errors; see `error.source`.            |
 
-c) Make sure nobody else can read the contents of your private directory:
+As with any Node.js `EventEmitter`, an `error` event with no listener throws.
+**Always listen for `error`.**
 
+#### Other exports
+
+- `RedisPusher.APNSMessage`, `RedisPusher.GCMMessage`: the message classes.
+- `RedisPusher.createMessage(platform, data)`: builds and validates a message, or throws.
+- `RedisPusher.defaults`: the default options (read-only).
+
+### Options
+
+Anything you don't set falls back to these defaults:
+
+	logger                         -- Object with console-like log/warn/error. Default: silent.
+
+	redis.host                     -- Default: '127.0.0.1'.
+	redis.port                     -- Default: 6379.
+	redis.pass                     -- Password, or '' if none. Default: ''.
+	redis.options                  -- Passed to redis.createClient(). Default: {}.
+	redis.channels                 -- Channels to subscribe to. Either an object mapping each channel to
+	                                  its platform, e.g. { 'push:ios': 'apns', 'push:android': 'gcm' },
+	                                  or an array of names, in which case the platform is guessed from
+	                                  the name: 'apns', 'ios', 'iphone' or 'ipad' => apns;
+	                                  'gcm' or 'android' => gcm.
+	redis.failoverEnabled          -- See "Failover redundancy". Default: false.
+	redis.lock.keyPrefix           -- Default: 'push_lock_'.
+	redis.lock.lockTimeout         -- Milliseconds. Default: 5000.
+	redis.lock.maxAttempts         -- Default: 5.
+
+	apns                           -- Set to false to disable APNS. APNS is also disabled when no
+	                                  certificate is given.
+	apns.certificate               -- Path to a .p12 (PKCS #12) file, or its contents as a Buffer.
+	apns.passphrase                -- The certificate's passphrase, if any.
+	apns.gateway.address           -- Default: 'gateway.push.apple.com'.
+	                                  Use 'gateway.sandbox.push.apple.com' for development.
+	apns.gateway.connectionTimeout -- Milliseconds. Default: 240000. Any other `apns.gateway` key is
+	                                  passed to apn.Connection.
+	apns.feedback.enabled          -- Default: true.
+	apns.feedback.address          -- Default: 'feedback.push.apple.com'.
+	                                  Use 'feedback.sandbox.push.apple.com' for development.
+	apns.feedback.interval         -- Polling interval in seconds. Default: 300.
+
+	gcm                            -- Set to false to disable GCM. GCM is also disabled when no key
+	                                  is given.
+	gcm.options.key                -- Your GCM API key.
+	gcm.options.retries            -- Default: 3.
+
+### Sharding
+
+You can split the workload across multiple instances by giving each one a
+different `redis.channels`.
+
+### Failover redundancy
+
+Multiple instances can subscribe to the same channel(s) at the same time. A
+Redis lock keyed on the message `identifier` makes sure only one of them sends
+each message. All instances sharing the same channel(s) must use the same
+`redis.lock.keyPrefix` and set `redis.failoverEnabled` to `true`.
+
+### What redis-pusher does not attempt to do
+
+It doesn't decide what to do with APNS feedback or GCM "not registered" replies.
+That depends on your setup (an SQL table of devices, for example). It emits the
+`feedback`, `transmissionError` and `registrationUpdated` events, and you decide
+what to do with them.
+
+## Usage as a standalone service (CLI)
+
+The package also installs a `redis-pusher` command. It takes a config file that
+exports the same options object, plus an optional `catchExceptions` flag:
+
+	$ redis-pusher path/to/config.js
+
+Without an argument, it loads `./private/config.<NODE_ENV>.js` (NODE_ENV
+defaults to `development`):
+
+	$ cp -ir node_modules/redis-pusher/examples/config private
 	$ chmod 700 private
+	$ $EDITOR private/config.development.js
+	$ NODE_ENV=development redis-pusher
 
-d) Edit your private configuration files according to your needs:
+The CLI logs to the console and prints the devices reported by the APNS
+feedback service. Stop it with Ctrl-C or SIGTERM.
 
-	config.redis.host          -- The host your Redis instance is running.
-	config.redis.port          -- The port your Redis instance is listening.
-	config.redis.pass          -- The password to your Redis instance.
-	                              Please, set to '' if you don't need it.
-	config.redis.channels      -- Which redis channels `redis-pusher` will listen to.
-	                              IMPORTANT: The current version of `redis-pusher` can only distinguish
-	                              APNS messages from GCM messages using the channel name. Channel names
-	                              for APNS must contain one of ['apns','ios','iphone','ipad'], and
-	                              channel names for GCM must contain one of ['gcm','android'].
-	                              "ABSURD!" you scream. Right! I just haven't had the time to come up
-	                              with a clean solution.
-
-	config.apns.certificate    -- The APNS certificate file in .p12 (PKCS #12) format.
-	config.apns.passphrase     -- The passphrase for your APNS certificate file.
-	                              Please, set to `undefined` if you don't need it.
-
-	config.gcm.options.key     -- Your GCM API key.
-
-###### Run it
-
-	$ NODE_ENV=development node . &
-	$ redis-cli
-	redis> publish development:push:ios '{ "identifier": "a-unique-identifier", "tokens": [ <device_token>, <anoter_device_token>, ... ], "expires": 300, "badge": 1, "sound": "default", "alert": "You have a new message" }'
-	redis> publish development:push:android '{ "identifier": "another-unique-identifier", "registrationId": [ [ <registration_id>, <another_registration_id>, ... ], "collapseKey": "status", "delayWhileIdle": false, "timeToLive": 300, "data": {  "key1": "foo", "key2": "bar" } }'
-
-##### Message format for iOS
+## Message format for iOS (APNS)
 
 	message {
-		identifier: [string]               -- Required. Unique identifier.
+		identifier: [string]               -- Unique identifier. Required for messages published via Redis
+		                                      (it's the lock key).
 		token: [string or array of string] -- Required. The APNS device token of a recipient device, or
-		                                      an array of them for sending to 1 or more (up to ???).
-		expires: [number]                  -- Seconds from now.
+		                                      an array of them.
+		expiry: [number]                   -- Seconds from now.
 		badge: [number]
 		sound: [string]
 		alert: [string]
@@ -134,29 +226,28 @@ d) Edit your private configuration files according to your needs:
 		                                      sending only once (0 retries).
 	}
 
-##### Message format for Android
+## Message format for Android (GCM)
 
 	message {
-		identifier: [string]                        -- Required. Unique identifier.
+		identifier: [string]                        -- Unique identifier. Required for messages published
+		                                               via Redis (it's the lock key).
 		registrationId: [string or array of string] -- Required. The GCM registration ID of a recipient
-		                                               device, or an array of them for sending to 1 or
-		                                               more devices (up to 1000). When you send a message
-		                                               to multiple registration IDs, that is called a
-		                                               multicast message.
+		                                               device, or an array of them (up to 1000). Sending
+		                                               to several registration IDs is called a multicast
+		                                               message.
 		collapseKey: [string]                       -- Optional. If there's an older message with the
 		                                               same collapseKey and registration ID, the older
-		                                               message will be discarded and the new one will
-		                                               take its place.
+		                                               message is discarded and the new one takes its
+		                                               place.
 		delayWhileIdle: [boolean]                   -- Optional. Default is false. If the device is
-		                                               connected but idle, the message will still be
-		                                               delivered right away unless the delay_while_idle
-		                                               flag is set to true. Otherwise, it will be stored
-		                                               in the GCM servers until the device is awake.
+		                                               connected but idle, the message is delivered
+		                                               right away unless delayWhileIdle is true. If it
+		                                               is true, the message is stored on the GCM servers
+		                                               until the device wakes up.
 		timeToLive: [number:0..2419200]             -- Optional. How long (in seconds) the message should
 		                                               be kept on GCM storage if the device is offline.
-		                                               Requests that don't contain this field default to
-		                                               the maximum period of 4 weeks. When a message
-		                                               times out, it will be discarded from the GCM
-		                                               storage.
+		                                               Requests without this field default to the
+		                                               maximum of 4 weeks. When a message times out,
+		                                               it's discarded from GCM storage.
 		data: [object]                              -- Optional. Custom data.
 	}

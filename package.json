@@ -1,16 +1,18 @@
 {
 	"name": "redis-pusher",
-	"version": "0.2.2",
-	"description": "A Node.js application that consumes messages published on Redis channels and send them as Push Notifications via APNS or GCM.",
+	"version": "0.3.0",
+	"description": "A Node.js library (and CLI) that consumes messages published on Redis channels and sends them as Push Notifications via APNS or GCM.",
 	"keywords": [ "redis", "sharding", "apple", "push", "notification", "iOS", "apns", "android", "gcm" ],
 	"author": "Jardel Weyrich <jweyrich@gmail.com>",
 	"main": "index.js",
+	"bin": {
+		"redis-pusher": "bin/redis-pusher.js"
+	},
 	"files": [
 		"index.js",
-		"config.js",
 		"lib/",
-		"examples/",
-		"private/config.defaults.js"
+		"bin/",
+		"examples/"
 	],
 	"repository": {
 		"type": "git",
@@ -21,7 +23,7 @@
 		"apn": "~1.3.2",
 		"lodash": "~2.4.1",
 		"redis": "~0.8.4",
-		"redis-locking-worker": "git://github.com/yahoo/redis-locking-worker.git"
+		"redis-locking-worker": "github:yahoo/redis-locking-worker#fd3300221acf1d78fd82afe8bd936a35d19f9084"
 	},
 	"engines": {
 		"node": "~0.10.12",

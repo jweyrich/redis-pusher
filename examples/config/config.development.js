@@ -3,23 +3,28 @@
 //
 
 var config = module.exports = require('./config.global');
-var this_config_name = 'development';
-config.loaded.push(this_config_name);
 
 //
 // Redis
 //
-config.redis.channels = [ 'development:push:ios', 'development:push:android' ];
+config.redis.channels = {
+	'development:push:ios': 'apns',
+	'development:push:android': 'gcm'
+};
 
 //
 // APNS
 //
-config.apns.certificate = 'private/aps_development.p12';
-config.apns.passphrase = '<CHANGEME>';
-config.apns.gateway.address = 'gateway.sandbox.push.apple.com'; // Development
-config.apns.feedback.address = 'feedback.sandbox.push.apple.com'; // Development
+config.apns = {
+	certificate: 'private/aps_development.p12', // Path or Buffer.
+	passphrase: '<CHANGEME>',
+	gateway: { address: 'gateway.sandbox.push.apple.com' },
+	feedback: { address: 'feedback.sandbox.push.apple.com' }
+};
 
 //
 // GCM
 //
-config.gcm.options.key = '<CHANGEME>'; // API key
+config.gcm = {
+	options: { key: '<CHANGEME>' } // API key
+};
