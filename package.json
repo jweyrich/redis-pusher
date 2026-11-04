@@ -27,7 +27,7 @@
 	],
 	"repository": {
 		"type": "git",
-		"url": "git@github.com:jweyrich/redis-pusher.git"
+		"url": "git+https://github.com/jweyrich/redis-pusher.git"
 	},
 	"scripts": {
 		"test": "node --test test/*.test.js"
@@ -39,5 +39,9 @@
 	"engines": {
 		"node": ">=22"
 	},
-	"license": "MIT"
+	"license": "MIT",
+	"homepage": "https://github.com/jweyrich/redis-pusher#readme",
+	"bugs": {
+		"url": "https://github.com/jweyrich/redis-pusher/issues"
+	}
 }
