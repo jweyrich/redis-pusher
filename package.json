@@ -5,6 +5,13 @@
 	"keywords": [ "redis", "sharding", "apple", "push", "notification", "iOS", "apns", "android", "gcm" ],
 	"author": "Jardel Weyrich <jweyrich@gmail.com>",
 	"main": "index.js",
+	"files": [
+		"index.js",
+		"config.js",
+		"lib/",
+		"examples/",
+		"private/config.defaults.js"
+	],
 	"repository": {
 		"type": "git",
 		"url": "git@github.com:jweyrich/redis-pusher.git"
